@@ -8,5 +8,9 @@ export default defineConfig(({ command }) => ({
   server: {
     host: true,
     port: parseInt(process.env.PORT || '5173'),
+    sourcemapIgnoreList: false // 소스 맵 무시 리스트 해제
+  },
+    build: {
+    sourcemap: true, // 빌드 시 소스 맵 생성
   },
 }))

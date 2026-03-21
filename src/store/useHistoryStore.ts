@@ -89,7 +89,7 @@ interface HistoryState {
   redo: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
-  save: () => void;
+  save: () => Promise<void>;
   load: () => void;
   saveToCloud: () => Promise<void>;
   loadFromCloud: () => Promise<boolean>;
@@ -167,17 +167,23 @@ export const useHistoryStore = create<HistoryState>()((set, get) => ({
   canRedo: () => get().future.length > 0,
 
   // localStorage 저장 (로컬 캐시, 사용자별)
-  save: () => {
+  save: async() => {
     const snap = captureSnapshot();
     try {
-      // 사용자별 키 사용
-      supabase.auth.getUser().then(({ data: { user } }) => {
-        const key = user ? `${STORAGE_KEY}-${user.id}` : STORAGE_KEY;
-        localStorage.setItem(key, JSON.stringify(snap));
-      });
+      //사용자별 키 사용
+      // supabase.auth.getUser().then(({ data: { user } }) => {
+      //   const key = user ? `${STORAGE_KEY}-${user.id}` : STORAGE_KEY;
+      //   localStorage.setItem(key, JSON.stringify(snap));
+      // });
+      const { data: { user } = {}, error } = await supabase.auth.getUser();
+      if (error) throw new Error(`사용자 정보 가져오기 실패: ${error.message}`);
+      console.log(`로컬 저장: ${user ? `사용자 ${user.id}` : '익명'}의 데이터 저장`);
+      const key = user ? `${STORAGE_KEY}-${user.id}` : STORAGE_KEY;
+      localStorage.setItem(key, JSON.stringify(snap));
       set({ dirty: false });
     } catch {
       // storage quota exceeded
+      console.warn('로컬 저장 실패: 저장 공간이 부족하거나 브라우저 설정이 제한되어 있을 수 있습니다.');
     }
   },
 

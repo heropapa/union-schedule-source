@@ -91,7 +91,7 @@ export default function ScheduleCalendar() {
       return;
     }
     if (!s.dirty && s.cloudSynced) return; // 변경 없으면 무시
-    s.save();
+    await s.save();
     await s.saveToCloud();
     if (useHistoryStore.getState().cloudSynced) {
       setToast('저장 완료 ✓');
