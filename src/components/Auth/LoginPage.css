@@ -1,0 +1,128 @@
+.login-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: #f5f7fa;
+}
+
+.login-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1);
+  padding: 40px 36px;
+  width: 360px;
+  max-width: 90vw;
+}
+
+.login-card h1 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 8px;
+  color: #333;
+}
+
+.login-subtitle {
+  text-align: center;
+  font-size: 0.85rem;
+  color: #888;
+  margin-bottom: 28px;
+}
+
+.login-field {
+  margin-bottom: 16px;
+}
+
+.login-field label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 6px;
+}
+
+.login-field input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.login-field input:focus {
+  border-color: #3174ad;
+  box-shadow: 0 0 0 3px rgba(49, 116, 173, 0.1);
+}
+
+.login-error {
+  background: #fff0f0;
+  color: #d32f2f;
+  font-size: 0.8rem;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+.login-btn {
+  width: 100%;
+  padding: 11px;
+  background: #3174ad;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.login-btn:hover {
+  background: #265d8c;
+}
+
+.login-btn:disabled {
+  background: #a0c4e0;
+  cursor: not-allowed;
+}
+
+.login-success {
+  background: #e8f5e9;
+  color: #2e7d32;
+  font-size: 0.8rem;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+.login-switch {
+  text-align: center;
+  font-size: 0.8rem;
+  color: #888;
+  margin-top: 16px;
+}
+
+.login-switch button {
+  background: none;
+  border: none;
+  color: #3174ad;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.login-switch button:hover {
+  color: #265d8c;
+}
+
+.login-contact {
+  text-align: center;
+  font-size: 0.78rem;
+  color: #999;
+  margin-top: 20px;
+  line-height: 1.5;
+}

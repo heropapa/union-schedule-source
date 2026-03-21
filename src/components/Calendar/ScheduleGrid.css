@@ -1,0 +1,849 @@
+.schedule-grid {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 16px 24px 24px;
+  overflow: hidden;
+}
+
+/* 헤더 */
+.grid-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.grid-nav {
+  display: flex;
+  gap: 6px;
+}
+
+.nav-btn {
+  padding: 6px 14px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #555;
+  transition: all 0.15s;
+}
+
+.nav-btn:hover {
+  background: #f0f0f0;
+  border-color: #ccc;
+}
+
+.today-btn {
+  font-weight: 600;
+  color: #3174ad;
+  border-color: #3174ad;
+}
+
+.week-label {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin: 0;
+}
+
+/* 툴바 (저장/되돌리기) */
+.grid-toolbar {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.toolbar-btn {
+  padding: 5px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: #555;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.toolbar-btn:hover:not(:disabled) {
+  background: #f0f0f0;
+  border-color: #ccc;
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.export-dropdown-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.export-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  z-index: 100;
+  min-width: 150px;
+  overflow: hidden;
+}
+
+.export-dropdown-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: #333;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.export-dropdown-menu button:hover {
+  background: #f0f4ff;
+}
+
+.export-dropdown-menu button + button {
+  border-top: 1px solid #eee;
+}
+
+.save-btn {
+  font-weight: 600;
+  color: #3174ad;
+  border-color: #3174ad;
+}
+
+.save-btn:hover:not(:disabled) {
+  background: #e3edf7;
+}
+
+.save-dirty {
+  animation: pulse-save 1.5s infinite;
+}
+
+@keyframes pulse-save {
+  0%, 100% { box-shadow: none; }
+  50% { box-shadow: 0 0 0 3px rgba(49, 116, 173, 0.25); }
+}
+
+.toolbar-user {
+  font-size: 0.78rem;
+  color: #666;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
+.logout-btn {
+  font-size: 0.75rem;
+  color: #999;
+  border-color: #ddd;
+  padding: 4px 10px;
+}
+
+.logout-btn:hover {
+  color: #d32f2f;
+  border-color: #d32f2f;
+}
+
+.grid-legend {
+  display: flex;
+  gap: 12px;
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-box {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid #ddd;
+}
+
+.legend-box.work {
+  background: #4caf50;
+  border-color: #388e3c;
+}
+
+.legend-box.off-uncovered {
+  background: #ef9a9a;
+  border-color: #c62828;
+}
+
+.legend-box.off-covered {
+  background: #a5d6a7;
+  border-color: #2e7d32;
+}
+
+.legend-box.off-duplicate {
+  background: #ffcc80;
+  border-color: #e65100;
+}
+
+.legend-box.custom {
+  background: #42a5f5;
+  border-color: #1565c0;
+}
+
+.legend-box.empty {
+  background: #f5f5f5;
+}
+
+/* 정렬 가능 헤더 */
+.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s;
+}
+
+.sortable:hover {
+  color: #3174ad;
+}
+
+/* 행 드래그 손잡이 */
+.row-drag-handle {
+  cursor: grab;
+  color: #ccc;
+  font-size: 0.65rem;
+  margin-right: 4px;
+  user-select: none;
+  transition: color 0.15s;
+}
+
+.row-drag-handle:hover {
+  color: #888;
+}
+
+.row-drag-handle:active {
+  cursor: grabbing;
+}
+
+/* 테이블 */
+.grid-table-wrap {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+}
+
+.grid-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  table-layout: fixed;
+}
+
+.grid-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.grid-table th {
+  background: #f5f5f5;
+  padding: 8px 4px;
+  font-weight: 600;
+  color: #555;
+  border-bottom: 2px solid #e0e0e0;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.grid-table th.sun {
+  color: #e53935;
+}
+
+.grid-table th.sat {
+  color: #1e88e5;
+}
+
+/* 행 호버 시 전체 하이라이트 + 이름 강조 */
+.grid-table tbody tr:hover {
+  background: #f0f4ff;
+}
+
+.grid-table tbody tr:hover td:first-child,
+.grid-table tbody tr:hover td:nth-child(2) {
+  background: #dbe4f8;
+  font-weight: 700;
+}
+
+.day-date {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: #999;
+}
+
+.col-type {
+  width: 50px;
+}
+
+.col-name {
+  width: 80px;
+}
+
+.col-routes {
+  width: 140px;
+  text-align: left !important;
+}
+
+.col-day {
+  width: 60px;
+}
+
+/* 행 */
+.grid-table td {
+  padding: 6px 4px;
+  border-bottom: 1px solid #f0f0f0;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.grid-table td.col-type {
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.grid-table td.col-type.backup {
+  color: #ff9800;
+  font-weight: 600;
+}
+
+.grid-table td.col-name {
+  font-weight: 500;
+  color: #333;
+}
+
+.grid-table td.col-routes {
+  font-size: 0.75rem;
+  color: #666;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 셀 */
+.cell {
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+  font-size: 0.85rem;
+  transition: background 0.1s;
+  border-left: 1px solid #f0f0f0;
+  position: relative;
+}
+
+.cell:hover {
+  filter: brightness(0.92);
+}
+
+/* 인라인 편집 */
+.cell-editing {
+  padding: 2px;
+  background: #e3f2fd;
+  border: 2px solid #1565c0;
+}
+
+.cell-input {
+  width: 100%;
+  padding: 3px 4px;
+  border: none;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-align: center;
+  outline: none;
+  background: #fff;
+  color: #1565c0;
+}
+
+.cell-work {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.cell-off {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.cell-custom {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.cell-empty {
+  background: #fafafa;
+  color: #ccc;
+}
+
+/* 휴무 셀 상태별 색상 */
+.cell-off-uncovered {
+  background: #ffcdd2 !important;  /* 빨강 — 미커버 */
+  color: #c62828 !important;
+}
+
+.cell-off-covered {
+  background: #c8e6c9 !important;  /* 초록 — 커버 완료 */
+  color: #2e7d32 !important;
+}
+
+.cell-off-duplicate {
+  background: #ffe0b2 !important;  /* 주황 — 중복 배정 */
+  color: #e65100 !important;
+}
+
+/* 휴무 셀 드래그 가능 표시 */
+.cell-off-draggable {
+  cursor: grab;
+}
+
+.cell-off-draggable:active {
+  cursor: grabbing;
+}
+
+/* 백업 근무 셀 — 라우트 표시 */
+.cell.backup-work {
+  font-size: 0.65rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 위반 행 */
+.row-violation {
+  background: #ffebee !important;
+}
+
+.row-violation td {
+  border-bottom-color: #ffcdd2 !important;
+}
+
+/* 구분선 */
+.separator-row td {
+  background: #e3f2fd;
+  font-weight: 600;
+  color: #1565c0;
+  font-size: 0.8rem;
+  padding: 6px 12px;
+  text-align: left;
+  border-bottom: 2px solid #90caf9;
+}
+.separator-row td.backup-sort {
+  cursor: pointer;
+  font-size: 0.72rem;
+  user-select: none;
+}
+.separator-row td.backup-sort:hover {
+  background: #bbdefb;
+}
+
+/* 위반 안내 */
+.violation-notice {
+  margin-top: 8px;
+  padding: 10px 16px;
+  background: #fff3e0;
+  border: 1px solid #ffcc80;
+  border-radius: 6px;
+  color: #e65100;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+/* ── 미커버 라우트 (요일 칸 정렬) ── */
+.uncovered-row td {
+  background: #fff8e1;
+  border-bottom: 1px solid #ffcc80;
+}
+
+.uncovered-label-cell {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #e65100;
+  text-align: center;
+  padding: 4px 8px;
+}
+
+.uncovered-cell {
+  padding: 4px 2px;
+  vertical-align: middle;
+  text-align: center;
+}
+
+.uncovered-cell .route-chip {
+  display: block;
+  margin: 2px auto;
+}
+
+/* ── 중복 배정 행 ── */
+.duplicate-row td {
+  background: #ffebee;
+  border-bottom: 1px solid #ef9a9a;
+}
+
+.duplicate-label-cell {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #c62828;
+  text-align: center;
+  padding: 4px 8px;
+}
+
+.duplicate-cell {
+  padding: 4px 2px;
+  vertical-align: middle;
+  text-align: center;
+}
+
+.dupe-item {
+  font-size: 0.68rem;
+  line-height: 1.3;
+  margin: 1px 0;
+}
+
+.dupe-route {
+  font-weight: 700;
+  color: #c62828;
+}
+
+.dupe-names {
+  color: #888;
+  margin-left: 2px;
+}
+
+.route-chip {
+  padding: 3px 10px;
+  border: 1px solid #e65100;
+  border-radius: 12px;
+  background: #fff;
+  color: #e65100;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: grab;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.route-chip:hover {
+  background: #fff3e0;
+}
+
+.route-chip:active {
+  cursor: grabbing;
+}
+
+.route-chip-dragging {
+  opacity: 0.4;
+}
+
+/* 백업 라우트 + 자동채우기 래퍼 */
+.routes-with-autofill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+.routes-with-autofill .routes-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 자동채우기 버튼 */
+.auto-fill-btn {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #42a5f5, #1e88e5);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  box-shadow: 0 1px 2px rgba(30,136,229,.3);
+  transition: background .15s, box-shadow .15s;
+}
+.auto-fill-btn:hover {
+  background: linear-gradient(135deg, #1e88e5, #1565c0);
+  box-shadow: 0 2px 4px rgba(30,136,229,.4);
+}
+
+/* 백업 셀 드롭 타겟 하이라이트 */
+.cell-drop-target {
+  background: #e8f5e9 !important;
+  outline: 2px dashed #4caf50;
+  outline-offset: -2px;
+  animation: pulse-drop 1s infinite;
+}
+
+@keyframes pulse-drop {
+  0%, 100% { outline-color: #4caf50; }
+  50% { outline-color: #81c784; }
+}
+
+/* 행 드래그 삽입 위치 표시 */
+.row-insert-above td {
+  border-top: 2px solid #3174ad !important;
+}
+
+.row-insert-below td {
+  border-bottom: 2px solid #3174ad !important;
+}
+
+/* 드래그 중 드롭 대상 행 하이라이트 */
+.drag-hover-row {
+  background: #e3f0ff !important;
+}
+
+.drag-hover-row td:first-child,
+.drag-hover-row td:nth-child(2) {
+  background: #c8dcf5 !important;
+  font-weight: 700;
+}
+
+/* 토스트 메시지 */
+.toast-message {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #333;
+  color: #fff;
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  z-index: 9999;
+  animation: toast-fade 2s ease-in-out;
+  pointer-events: none;
+}
+
+@keyframes toast-fade {
+  0% { opacity: 0; transform: translateX(-50%) translateY(10px); }
+  15% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  85% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+}
+
+/* ── 엑셀 드롭다운 구분선 ── */
+.export-divider {
+  margin: 2px 0;
+  border: none;
+  border-top: 1px solid #eee;
+}
+
+/* ── 임포트 모달 ── */
+.import-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 16px;
+}
+
+.import-modal {
+  background: white;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 560px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+}
+
+.import-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.import-modal-header h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+  color: #1a1a2e;
+}
+
+.import-close-btn {
+  border: none;
+  background: none;
+  font-size: 22px;
+  color: #999;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.import-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.import-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.import-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 12px;
+}
+
+.badge-ok { background: #e8f5e9; color: #2e7d32; }
+.badge-warn { background: #fff3cd; color: #856404; }
+.badge-info { background: #e3f2fd; color: #1565c0; }
+
+.import-dates {
+  width: 100%;
+  font-size: 12px;
+  color: #888;
+  margin-top: 4px;
+}
+
+.import-section-block {
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.import-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
+
+.ok-title { color: #2e7d32; }
+.warn-title { color: #856404; }
+.info-title { color: #1565c0; }
+
+.import-match-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.import-chip {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.chip-match { background: #e8f5e9; color: #2e7d32; }
+.chip-off { background: #ffecd2; color: #d35400; }
+
+.import-mismatch-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.import-mismatch-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #fffbf0;
+  border: 1px solid #ffe0a0;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.mismatch-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.mismatch-row { font-weight: 700; color: #856404; white-space: nowrap; }
+.mismatch-name { font-weight: 600; color: #333; }
+.mismatch-id { color: #888; font-size: 11px; }
+.mismatch-date { color: #666; font-size: 11px; }
+.mismatch-reason { color: #c0392b; font-weight: 500; font-size: 11px; }
+
+.mismatch-add-check {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #3174ad;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mismatch-add-check input { margin: 0; }
+
+.import-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid #eee;
+}
+
+.import-cancel-btn {
+  padding: 8px 16px;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  background: white;
+  color: #666;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.import-cancel-btn:hover { background: #f5f5f5; }
+
+.import-apply-btn {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 6px;
+  background: #3174ad;
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.import-apply-btn:hover { background: #245d8e; }
+.import-apply-btn:disabled { background: #ccc; cursor: not-allowed; }

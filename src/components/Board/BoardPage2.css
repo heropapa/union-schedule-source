@@ -1,0 +1,138 @@
+/* ── 달력/테이블 토글 ── */
+.view-toggle {
+  display: flex;
+  justify-content: center;
+  gap: 0;
+  margin: 6px 0 8px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #d0d5dd;
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.view-btn {
+  padding: 5px 16px;
+  border: none;
+  background: white;
+  font-size: 12px;
+  font-weight: 600;
+  color: #888;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.view-btn + .view-btn { border-left: 1px solid #d0d5dd; }
+.view-btn.active { background: #1a1a2e; color: white; }
+.view-btn:active { opacity: 0.8; }
+
+/* ── 버전2: 주간 테이블 ── */
+.v2-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 2px;
+}
+
+.v2-week-block {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: white;
+}
+
+.v2-week-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a1a2e;
+  padding: 6px 10px;
+  background: #f5f6f8;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.v2-table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.v2-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  min-width: 360px;
+  font-size: 11px;
+}
+
+.v2-header-cell {
+  padding: 4px 2px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 10px;
+  color: #555;
+  background: #e8f0fe;
+  border: 1px solid #d0d5dd;
+  white-space: nowrap;
+}
+
+.v2-header-cell.sun { color: #e74c3c; }
+.v2-header-cell.sat { color: #3174ad; }
+.v2-header-cell.v2-today { background: #dbeafe; box-shadow: inset 0 -2px 0 #3174ad; }
+
+.v2-day-label { font-size: 9px; color: #999; }
+.v2-header-clickable, .v2-cell-clickable { cursor: pointer; }
+.v2-header-clickable:hover { background: #d6e4f0; }
+.v2-header-cell.v2-selected { background: #dbeafe !important; box-shadow: inset 0 -2px 0 #3174ad; }
+
+.v2-name-col {
+  width: 48px;
+  min-width: 48px;
+  max-width: 56px;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: white;
+}
+
+.v2-cell {
+  padding: 2px 1px;
+  text-align: center;
+  border: 1px solid #eee;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.v2-row-num {
+  font-weight: 600;
+  color: #888;
+  text-align: center;
+  background: #fafafa !important;
+}
+
+/* 휴무자 행 */
+.v2-off-row .v2-cell { background: #faf8f6; }
+.v2-off-cell { color: #6d4c41; font-weight: 500; }
+
+/* 백업 헤더 */
+.v2-backup-header .v2-header-cell { background: #e8f5e9; color: #2e7d32; }
+
+/* 백업자 행 */
+.v2-backup-name { font-weight: 600; color: #333; text-align: center !important; }
+.v2-route-cell { color: #2e7d32; font-weight: 500; }
+.v2-empty-cell { color: #ddd; }
+
+/* 빈 주 */
+.v2-empty-week {
+  padding: 12px;
+  text-align: center;
+  color: #aaa;
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* 지난 주 접기 */
+.v2-past { opacity: 0.7; }
+.v2-past .v2-week-label { background: #eee; }
+.v2-collapse-icon { float: right; font-size: 10px; color: #999; }
