@@ -4,7 +4,7 @@ import ScheduleCalendar from './components/Calendar/ScheduleCalendar';
 import LoginPage from './components/Auth/LoginPage';
 import BoardPage2 from './components/Board/BoardPage2';
 import { useAuthStore } from './store/useAuthStore';
-import { useHistoryStore } from './store/useHistoryStore';
+import { useWorkerStore } from './store/useWorkerStore';
 import './styles/global.css';
 
 /** hash 기반 간단 라우팅 */
@@ -36,17 +36,18 @@ function MainApp() {
     initialize();
   }, [initialize]);
 
-  // 로그인 후 클라우드 데이터 로드 (유저 변경 시 재로드)
+  // 로그인 후 DB에서 캠프 목록 로드
   useEffect(() => {
     const userId = session?.user?.id ?? null;
     if (!userId || loadedUserId.current === userId) return;
     loadedUserId.current = userId;
 
     async function loadData() {
-      const loaded = await useHistoryStore.getState().loadFromCloud();
-      if (!loaded) {
-        // 클라우드에 데이터 없으면 localStorage 폴백
-        useHistoryStore.getState().load();
+      try {
+        await useWorkerStore.getState().loadCamps();
+        console.log('캠프 목록 로드 완료');
+      } catch (err) {
+        console.error('캠프 로드 실패:', err);
       }
     }
     loadData();

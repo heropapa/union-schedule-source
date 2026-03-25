@@ -86,53 +86,66 @@ export default function BoardPage2() {
     return [m1, m2];
   }, [today]);
 
-  /* 데이터 로드 — 캠프별 파일 우선, 없으면 기존 schedule.json 폴백 */
+  /* 데이터 로드 — DB에서 published 캠프만 로드 */
   useEffect(() => {
     (async () => {
       try {
+        // atone 계정으로 로그인 (DB 읽기 권한)
         const { error: authErr } = await boardSupabase.auth.signInWithPassword({
           email: ATONE_EMAIL, password: ATONE_PW,
         });
         if (authErr) throw new Error('인증 실패: ' + authErr.message);
 
-        // 1) meta.json 시도
-        const { data: metaData } = await boardSupabase.storage
-          .from('snapshots')
-          .download(`${ATONE_UID}/meta.json`);
+        // 1) published 캠프 목록 로드
+        const { data: campRows, error: campErr } = await boardSupabase
+          .from('camps')
+          .select('*')
+          .eq('published', true)
+          .order('sort_order');
+        if (campErr) throw new Error('캠프 로드 실패: ' + campErr.message);
 
-        if (metaData) {
-          const meta = JSON.parse(await metaData.text()) as { camps: Camp[]; orders?: Record<string, unknown> };
-          const allWorkers: Worker[] = [];
-          const allRoutes: Record<string, Route[]> = {};
-          const allCells: Record<string, ScheduleCell> = {};
+        const camps: Camp[] = (campRows ?? []).map((r: any) => ({
+          id: r.id, name: r.name, wave: r.wave, color: r.color, companyId: r.company_id,
+        }));
 
-          const results = await Promise.allSettled(
-            meta.camps.map(async (camp) => {
-              const { data } = await boardSupabase.storage
-                .from('snapshots')
-                .download(`${ATONE_UID}/camp_${camp.id}.json`);
-              if (!data) return null;
-              return { campId: camp.id, ...(JSON.parse(await data.text()) as { workers: Worker[]; routes: Route[]; cells: Record<string, ScheduleCell> }) };
-            }),
-          );
-
-          for (const r of results) {
-            if (r.status !== 'fulfilled' || !r.value) continue;
-            const { campId, workers, routes, cells } = r.value;
-            allWorkers.push(...workers);
-            allRoutes[campId] = routes;
-            Object.assign(allCells, cells);
-          }
-
-          setSnap({ workers: allWorkers, routes: allRoutes, cells: allCells, camps: meta.camps });
-        } else {
-          // 2) 기존 schedule.json 폴백
-          const { data, error: dlErr } = await boardSupabase.storage
-            .from('snapshots')
-            .download(`${ATONE_UID}/schedule.json`);
-          if (dlErr || !data) throw new Error('데이터 로드 실패');
-          setSnap(JSON.parse(await data.text()) as Snapshot);
+        if (camps.length === 0) {
+          // published 캠프가 없으면 전체 캠프 로드 (하위호환)
+          const { data: allCampRows } = await boardSupabase.from('camps').select('*').order('sort_order');
+          camps.push(...(allCampRows ?? []).map((r: any) => ({
+            id: r.id, name: r.name, wave: r.wave, color: r.color, companyId: r.company_id,
+          })));
         }
+
+        // 2) 각 캠프의 workers, routes, cells 병렬 로드
+        const allWorkers: Worker[] = [];
+        const allRoutes: Record<string, Route[]> = {};
+        const allCells: Record<string, ScheduleCell> = {};
+
+        await Promise.all(camps.map(async (camp) => {
+          const [wRes, rRes, cRes] = await Promise.all([
+            boardSupabase.from('workers').select('*').eq('camp_id', camp.id).order('sort_order'),
+            boardSupabase.from('routes').select('*').eq('camp_id', camp.id).order('sort_order'),
+            boardSupabase.from('schedule_cells').select('*').eq('camp_id', camp.id),
+          ]);
+
+          const workers = (wRes.data ?? []).map((r: any) => ({
+            id: r.id, name: r.name, loginId: r.login_id, campId: r.camp_id,
+            role: r.role, assignedRoutes: r.assigned_routes ?? [], rotations: r.rotations ?? [],
+          }));
+          allWorkers.push(...workers);
+
+          allRoutes[camp.id] = (rRes.data ?? []).map((r: any) => ({
+            id: r.route_id, subRoutes: r.sub_routes ?? [],
+          }));
+
+          for (const r of cRes.data ?? []) {
+            allCells[`${r.worker_id}::${r.date}`] = {
+              workerId: r.worker_id, date: r.date, status: r.status, routes: r.routes ?? [],
+            };
+          }
+        }));
+
+        setSnap({ workers: allWorkers, routes: allRoutes, cells: allCells, camps });
       } catch (e: any) {
         setError(e.message || '알 수 없는 오류');
       } finally {

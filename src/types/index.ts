@@ -85,3 +85,20 @@ export interface ScheduleData {
   campId: string;
   weeks: WeekSchedule[];
 }
+
+/** 캠프 권한 */
+export interface CampPermission {
+  userId: string;
+  campId: string;
+  canEdit: boolean;
+}
+
+/** 캠프 잠금 정보 */
+export interface CampLock {
+  campId: string;
+  lockedBy: string;
+  lockedAt: string;
+  heartbeat: string;
+  sessionId: string;
+  displayName?: string;  // UI 표시용
+}

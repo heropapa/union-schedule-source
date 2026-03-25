@@ -3,6 +3,7 @@ import type { CellStatus, ScheduleCell, SubRoute, Worker } from '../types';
 import { useWorkerStore } from './useWorkerStore';
 import { pushHistory } from './historyBridge';
 import { format, addDays, startOfWeek } from 'date-fns';
+import * as db from '../lib/db';
 
 /** 셀 키 생성 */
 function cellKey(workerId: string, date: string) {
@@ -27,6 +28,9 @@ interface ScheduleState {
   selectedCampId: string;
   weekStart: Date;
   weekDates: string[];
+
+  // DB 로드
+  loadCells: (campId: string, dateRange?: { start: string; end: string }) => Promise<void>;
 
   // 네비게이션
   setcamp: (campId: string) => void;
@@ -59,6 +63,13 @@ export const useScheduleStore = create<ScheduleState>()((set, get) => ({
   weekStart: initialWeekStart,
   weekDates: getWeekDates(initialWeekStart),
 
+  loadCells: async (campId, dateRange) => {
+    const cells = await db.fetchCellsByCamp(campId, dateRange);
+    set((state) => ({
+      cells: { ...state.cells, ...cells },
+    }));
+  },
+
   setcamp: (campId) => set({ selectedCampId: campId }),
 
   setWeek: (date) => {
@@ -84,12 +95,11 @@ export const useScheduleStore = create<ScheduleState>()((set, get) => ({
   setCell: (workerId, date, status, cellRoutes) => {
     pushHistory();
     const key = cellKey(workerId, date);
+    const cell: ScheduleCell = { workerId, date, status, routes: cellRoutes };
     set((state) => ({
-      cells: {
-        ...state.cells,
-        [key]: { workerId, date, status, routes: cellRoutes },
-      },
+      cells: { ...state.cells, [key]: cell },
     }));
+    // DB 저장은 저장 버튼 클릭 시에만 (ScheduleCalendar.handleSave)
   },
 
   clearCell: (workerId, date) => {
@@ -100,6 +110,7 @@ export const useScheduleStore = create<ScheduleState>()((set, get) => ({
       delete next[key];
       return { cells: next };
     });
+    // DB 저장은 저장 버튼 클릭 시에만
   },
 
   getCell: (workerId, date) => {

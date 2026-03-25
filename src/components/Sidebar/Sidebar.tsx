@@ -2,9 +2,11 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useScheduleStore } from '../../store/useScheduleStore';
 import { useWorkerStore } from '../../store/useWorkerStore';
 import { markDirty } from '../../store/historyBridge';
-import type { Worker, WorkerRole } from '../../types';
+import type { Worker, WorkerRole, CampPermission } from '../../types';
 import { ROTATIONS_BY_WAVE, COMPANIES } from '../../types';
 import { useAuthStore } from '../../store/useAuthStore';
+import * as db from '../../lib/db';
+import type { UserProfile } from '../../lib/db';
 import './Sidebar.css';
 
 /** ID 배열 재정렬 */
@@ -85,10 +87,77 @@ function parseRouteInput(input: string): { routeId: string; suffixes: string[] }
 }
 
 export default function Sidebar() {
-  const { selectedCampId, setcamp } = useScheduleStore();
+  const { selectedCampId, setcamp, loadCells } = useScheduleStore();
   const store = useWorkerStore();
 
-  const _isAdmin = useAuthStore().isAdmin(); // 나중에 권한 분리 시 사용
+  // 캠프 선택 시 DB에서 데이터 로드
+  const selectCamp = async (campId: string) => {
+    setcamp(campId);
+    try {
+      await store.loadCamp(campId);
+      await loadCells(campId);
+    } catch (err) {
+      console.error('캠프 데이터 로드 실패:', err);
+    }
+  };
+
+  const isAdmin = useAuthStore().isAdmin();
+
+  // ── 권한 관리 (admin 전용) ──
+  const [permDropdownCamp, setPermDropdownCamp] = useState<string | null>(null);
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const [permissions, setPermissions] = useState<CampPermission[]>([]);
+
+  const [publishedCamps, setPublishedCamps] = useState<Set<string>>(new Set());
+
+  // admin이면 유저 목록 + 권한 + 게시 상태 로드
+  useEffect(() => {
+    if (!isAdmin) return;
+    db.fetchAllUsers().then(users => {
+      // admin, atone 제외
+      setAllUsers(users.filter(u => u.role !== 'admin' && u.email !== 'atone@schedule.local'));
+    }).catch(() => {});
+    db.fetchPermissions().then(setPermissions).catch(() => {});
+    // 게시 상태 로드
+    import('../../lib/supabase').then(({ supabase }) => {
+      supabase.from('camps').select('id,published').then(({ data }) => {
+        const pubSet = new Set((data ?? []).filter((r: any) => r.published).map((r: any) => r.id));
+        setPublishedCamps(pubSet);
+      });
+    });
+  }, [isAdmin]);
+
+  const togglePublish = async (campId: string) => {
+    const isPublished = publishedCamps.has(campId);
+    try {
+      await db.setCampPublished(campId, !isPublished);
+      setPublishedCamps(prev => {
+        const next = new Set(prev);
+        if (isPublished) next.delete(campId); else next.add(campId);
+        return next;
+      });
+    } catch (err) {
+      console.error('게시 상태 변경 실패:', err);
+    }
+  };
+
+  const togglePermission = async (userId: string, campId: string) => {
+    const existing = permissions.find(p => p.userId === userId && p.campId === campId);
+    const newCanEdit = !existing?.canEdit;
+    try {
+      await db.setPermission(userId, campId, newCanEdit);
+      if (newCanEdit) {
+        setPermissions(prev => [
+          ...prev.filter(p => !(p.userId === userId && p.campId === campId)),
+          { userId, campId, canEdit: true },
+        ]);
+      } else {
+        setPermissions(prev => prev.filter(p => !(p.userId === userId && p.campId === campId)));
+      }
+    } catch (err) {
+      console.error('권한 변경 실패:', err);
+    }
+  };
   const [selectedCompanyId, setSelectedCompanyId] = useState('union');
   const selectedCompany = COMPANIES.find((c) => c.id === selectedCompanyId) ?? COMPANIES[0];
   const [sidebarWave, setSidebarWave] = useState<'WAVE2' | 'WAVE1'>('WAVE2');
@@ -356,7 +425,7 @@ export default function Sidebar() {
                 setSelectedCompanyId(co.id);
                 // 업체 변경 시: 해당 업체+현재 웨이브의 첫 캠프 선택, 없으면 빈 값
                 const companyCamps = store.camps.filter((c) => (c.companyId ?? 'union') === co.id && (c.wave || 'WAVE1') === sidebarWave);
-                setcamp(companyCamps.length > 0 ? companyCamps[0].id : '');
+                if (companyCamps.length > 0) selectCamp(companyCamps[0].id); else setcamp('');
               }}
             >
               {co.label}
@@ -373,11 +442,12 @@ export default function Sidebar() {
       <div className="sidebar-section">
         <h3 className="section-title">
           캠프 선택
-          {<button className="add-btn" onClick={() => setAddingCamp(true)} title="캠프 추가">+</button>}
+          {isAdmin && <button className="add-btn" onClick={() => setAddingCamp(true)} title="캠프 추가">+</button>}
         </h3>
         <div className="wave-tabs-sidebar">
           <button className={`wave-tab-sidebar ${sidebarWave === 'WAVE2' ? 'active' : ''}`} onClick={() => { setSidebarWave('WAVE2'); setcamp(''); }}>주간</button>
           <button className={`wave-tab-sidebar ${sidebarWave === 'WAVE1' ? 'active' : ''}`} onClick={() => { setSidebarWave('WAVE1'); setcamp(''); }}>야간</button>
+
         </div>
         <div className="camp-filter">
           {camps.map((camp) => (
@@ -430,7 +500,7 @@ export default function Sidebar() {
               ) : (
                 <button
                   className={`camp-btn ${selectedCampId === camp.id ? 'active' : ''}`}
-                  onClick={() => setcamp(camp.id)}
+                  onClick={() => selectCamp(camp.id)}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     setEditingCamp({ id: camp.id, name: camp.name, wave: camp.wave ?? 'WAVE1' });
@@ -444,17 +514,67 @@ export default function Sidebar() {
                   </span>
                 </button>
               )}
-              {camps.length > 1 && selectedCampId !== camp.id && !editingCamp && (
+              {isAdmin && !editingCamp && (
                 <button
-                  className="camp-del-btn"
+                  className={`camp-perm-btn ${permDropdownCamp === camp.id ? 'active' : ''}`}
                   onClick={(e) => {
                     e.stopPropagation();
+                    setPermDropdownCamp(permDropdownCamp === camp.id ? null : camp.id);
+                  }}
+                  title="수정 권한 관리"
+                >
+                  {permDropdownCamp === camp.id ? '▾' : '▸'}
+                </button>
+              )}
+              {isAdmin && camps.length > 1 && selectedCampId !== camp.id && !editingCamp && (
+                <button
+                  className="camp-del-btn"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!confirm(`"${camp.name}" 캠프를 삭제하시겠습니까?\n소속 기사, 라우트, 스케쥴이 모두 삭제됩니다.`)) return;
+                    const pw = prompt('삭제를 확인하려면 현재 계정의 비밀번호를 입력하세요:');
+                    if (!pw) return;
+                    const { supabase: sb } = await import('../../lib/supabase');
+                    const userEmail = useAuthStore.getState().user?.email;
+                    if (!userEmail) return;
+                    const { error: authErr } = await sb.auth.signInWithPassword({ email: userEmail, password: pw });
+                    if (authErr) { alert('비밀번호가 일치하지 않습니다.'); return; }
                     store.removeCamp(camp.id);
                   }}
                   title="캠프 삭제"
                 >
                   &times;
                 </button>
+              )}
+              {/* 권한 드롭다운 */}
+              {permDropdownCamp === camp.id && isAdmin && (
+                <div className="perm-dropdown" onClick={(e) => e.stopPropagation()}>
+                  <label className="perm-publish-row">
+                    <input
+                      type="checkbox"
+                      checked={publishedCamps.has(camp.id)}
+                      onChange={() => togglePublish(camp.id)}
+                    />
+                    <span>게시판에 공개</span>
+                  </label>
+                  <div className="perm-dropdown-title">수정 권한</div>
+                  <div className="perm-user-list">
+                  {allUsers.map((user) => {
+                    const hasPerm = permissions.some(p => p.userId === user.id && p.campId === camp.id && p.canEdit);
+                    return (
+                      <label key={user.id} className="perm-user-row">
+                        <input
+                          type="checkbox"
+                          checked={hasPerm}
+                          onChange={() => togglePermission(user.id, camp.id)}
+                        />
+                        <span>{user.displayName}</span>
+                      </label>
+                    );
+                  })}
+                  </div>
+                  {allUsers.length === 0 && <div className="perm-empty">등록된 사용자 없음</div>}
+                </div>
               )}
             </div>
           ))}

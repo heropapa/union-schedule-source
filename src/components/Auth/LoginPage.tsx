@@ -6,7 +6,7 @@ import './LoginPage.css';
 type Mode = 'login' | 'signup';
 
 export default function LoginPage() {
-  const { login, signup, loading, error, kickedOut } = useAuthStore();
+  const { login, signup, loading, error } = useAuthStore();
   const [mode, setMode] = useState<Mode>('login');
   const [userId, setUserId] = useState('admin');
   const [password, setPassword] = useState('');
@@ -123,9 +123,8 @@ export default function LoginPage() {
         <h1>주식회사 넥스트유니온<br/>스케쥴 관리 프로그램</h1>
         <p className="login-subtitle">로그인하여 스케줄을 확인하세요</p>
 
-        {kickedOut && <div className="login-error">다른 기기에서 로그인하여 현재 세션이 종료되었습니다.<br/>다시 로그인해주세요.</div>}
         {successMsg && <div className="login-success">{successMsg}</div>}
-        {error && !kickedOut && <div className="login-error">{error}</div>}
+        {error && <div className="login-error">{error}</div>}
 
         <div className="login-field">
           <label>아이디</label>
