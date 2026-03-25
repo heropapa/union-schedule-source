@@ -83,20 +83,33 @@ export default function ScheduleCalendar() {
   const [regularOrder, setRegularOrder] = useState<string[]>([]);
   const [backupOrder, setBackupOrder] = useState<string[]>([]);
 
-  // Ctrl+S 저장 단축키
+  // Ctrl+S 저장
+  const [saving, setSaving] = useState(false);
   const handleSave = useCallback(async () => {
-    const s = useHistoryStore.getState();
-    if (s.cloudLoading) {
-      useHistoryStore.setState({ cloudLoading: false });
-      return;
-    }
-    if (!s.dirty && s.cloudSynced) return; // 변경 없으면 무시
-    await s.save();
-    await s.saveToCloud();
-    if (useHistoryStore.getState().cloudSynced) {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const campId = useScheduleStore.getState().selectedCampId;
+      if (!campId) return;
+      const ws = useWorkerStore.getState();
+      const ss = useScheduleStore.getState();
+      const workers = ws.workers.filter(w => w.campId === campId);
+      const routes = ws.routes[campId] ?? [];
+      const cells = Object.values(ss.cells).filter(c => workers.some(w => w.id === c.workerId));
+
+      const db = await import('../../lib/db');
+      await Promise.all(workers.map((w, i) => db.upsertWorker(w, i)));
+      await Promise.all(routes.map((r, i) => db.upsertRoute(campId, r, i)));
+      if (cells.length) await db.upsertCellsBatch(cells, campId);
+
       setToast('저장 완료 ✓');
+    } catch (err: any) {
+      console.error('저장 실패:', err);
+      alert('저장 실패:\n' + (err?.message || '알 수 없는 오류'));
+    } finally {
+      setSaving(false);
     }
-  }, []);
+  }, [saving]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -594,12 +607,12 @@ export default function ScheduleCalendar() {
             다시 실행 &#x21AA;
           </button>
           <button
-            className={`toolbar-btn save-btn ${history.dirty ? 'save-dirty' : ''}`}
+            className="toolbar-btn save-btn"
             onClick={handleSave}
-            disabled={!history.dirty && history.cloudSynced && !history.cloudLoading}
-            title={history.cloudLoading ? '클릭하면 저장 취소' : '저장 (Ctrl+S)'}
+            disabled={saving}
+            title="저장 (Ctrl+S)"
           >
-            {history.cloudLoading ? '저장 취소' : '저장'}
+            {saving ? '저장 중...' : '저장'}
           </button>
           <button
             className="toolbar-btn board-btn"

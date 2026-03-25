@@ -498,33 +498,35 @@ export default function Sidebar() {
                   </div>
                 </div>
               ) : (
-                <button
-                  className={`camp-btn ${selectedCampId === camp.id ? 'active' : ''}`}
-                  onClick={() => selectCamp(camp.id)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setEditingCamp({ id: camp.id, name: camp.name, wave: camp.wave ?? 'WAVE1' });
-                  }}
-                  title="우클릭: 캠프 편집"
-                >
-                  <span className="camp-dot" style={{ background: camp.color || '#888' }} />
-                  {camp.name}
-                  <span className={`wave-badge ${camp.wave === 'WAVE2' ? 'wave2' : ''}`}>
-                    {camp.wave === 'WAVE2' ? '주간' : '야간'}
-                  </span>
-                </button>
-              )}
-              {isAdmin && !editingCamp && (
-                <button
-                  className={`camp-perm-btn ${permDropdownCamp === camp.id ? 'active' : ''}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPermDropdownCamp(permDropdownCamp === camp.id ? null : camp.id);
-                  }}
-                  title="수정 권한 관리"
-                >
-                  {permDropdownCamp === camp.id ? '▾' : '▸'}
-                </button>
+                <>
+                  {isAdmin && (
+                    <button
+                      className={`camp-perm-btn ${permDropdownCamp === camp.id ? 'active' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPermDropdownCamp(permDropdownCamp === camp.id ? null : camp.id);
+                      }}
+                      title="수정 권한 관리"
+                    >
+                      {permDropdownCamp === camp.id ? '▾' : '▸'}
+                    </button>
+                  )}
+                  <button
+                    className={`camp-btn ${selectedCampId === camp.id ? 'active' : ''}`}
+                    onClick={() => selectCamp(camp.id)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setEditingCamp({ id: camp.id, name: camp.name, wave: camp.wave ?? 'WAVE1' });
+                    }}
+                    title="우클릭: 캠프 편집"
+                  >
+                    <span className="camp-dot" style={{ background: camp.color || '#888' }} />
+                    {camp.name}
+                    <span className={`wave-badge ${camp.wave === 'WAVE2' ? 'wave2' : ''}`}>
+                      {camp.wave === 'WAVE2' ? '주간' : '야간'}
+                    </span>
+                  </button>
+                </>
               )}
               {isAdmin && camps.length > 1 && selectedCampId !== camp.id && !editingCamp && (
                 <button
