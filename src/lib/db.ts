@@ -2,7 +2,7 @@
  * DB 접근 레이어 — 모든 Store는 이 모듈을 통해 Supabase DB에 접근
  */
 import { supabase } from './supabase';
-import type { Camp, Worker, Route, ScheduleCell, SubRoute, CampPermission, CampLock } from '../types';
+import type { Camp, Worker, Route, ScheduleCell, CampPermission, CampLock } from '../types';
 
 // ─── Camp ───────────────────────────────────────────────
 

@@ -81,11 +81,11 @@ export function parseAdminExcel(buffer: ArrayBuffer): ImportRow[] {
   const ws = wb.Sheets[wb.SheetNames[0]];
   if (!ws) return [];
 
-  const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { header: 1 });
+  const raw = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1 });
   if (raw.length < 2) return [];
 
   // 헤더 행에서 컬럼 인덱스 매핑
-  const header = (raw[0] as unknown[]).map((v) => String(v ?? '').trim());
+  const header = raw[0].map((v) => String(v ?? '').trim());
   const colIdx = {
     date: header.findIndex((h) => h.includes('업무일')),
     camp: header.findIndex((h) => h.includes('캠프')),
@@ -99,7 +99,7 @@ export function parseAdminExcel(buffer: ArrayBuffer): ImportRow[] {
 
   const rows: ImportRow[] = [];
   for (let i = 1; i < raw.length; i++) {
-    const r = raw[i] as unknown[];
+    const r = raw[i];
     if (!r || r.length === 0) continue;
 
     const dateVal = colIdx.date >= 0 ? r[colIdx.date] : undefined;

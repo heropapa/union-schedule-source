@@ -45,7 +45,7 @@ function cellFill(status: string | undefined): { fgColor?: { rgb: string } } | u
 
 export function exportScheduleExcel(opts: ExportOptions) {
   const {
-    campName, weekLabel, weekDates,
+    campName, weekDates,
     regulars, backups,
     getEffectiveCell, getUncoveredRoutes, getDuplicateRoutes,
   } = opts;
@@ -130,14 +130,13 @@ export function exportScheduleExcel(opts: ExportOptions) {
 
   // 데이터 행 스타일
   let rowIdx = 1;
-  const allWorkers = [...regulars, ...backups];
   for (const w of regulars) {
-    styleDataRow(ws, rowIdx, weekDates, w, getEffectiveCell, totalCols);
+    styleDataRow(ws, rowIdx, weekDates, w, getEffectiveCell);
     rowIdx++;
   }
   rowIdx++; // 구분선
   for (const w of backups) {
-    styleDataRow(ws, rowIdx, weekDates, w, getEffectiveCell, totalCols);
+    styleDataRow(ws, rowIdx, weekDates, w, getEffectiveCell);
     rowIdx++;
   }
 
@@ -154,7 +153,6 @@ function styleDataRow(
   weekDates: string[],
   worker: Worker,
   getEffectiveCell: ExportOptions['getEffectiveCell'],
-  totalCols: number,
 ) {
   // 고정 컬럼 (구분, 이름, 아이디, 라우트) 스타일
   for (let c = 0; c < 4; c++) {
