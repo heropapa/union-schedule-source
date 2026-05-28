@@ -12,6 +12,16 @@ dist
 dist-ssr
 *.local
 
+# Build/preview artifacts
+_preview_dist/
+
+# Archives (should not be tracked)
+*.zip
+
+# Excel exports (generated, not source)
+schedule-v2-*.xlsx
+통영*.xlsx
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
