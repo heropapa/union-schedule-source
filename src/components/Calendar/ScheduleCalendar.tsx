@@ -4,7 +4,7 @@ import { useWorkerStore } from '../../store/useWorkerStore';
 import { useHistoryStore } from '../../store/useHistoryStore';
 import { markDirty } from '../../store/historyBridge';
 import { DAY_LABELS, COMPANIES } from '../../types';
-import type { Worker, CellStatus } from '../../types';
+import type { Worker, CellStatus, CampLock } from '../../types';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale/ko';
 import { exportScheduleExcel } from '../../utils/exportExcel';
@@ -48,9 +48,16 @@ export default function ScheduleCalendar() {
 
   const auth = useAuthStore();
   const camps = workerStore.camps;
-  const _isAdmin = auth.isAdmin(); // 나중에 권한 분리 시 사용
   const regulars = workerStore.getRegularWorkers(store.selectedCampId);
   const backups = workerStore.getBackupWorkers(store.selectedCampId);
+
+  // ── 캠프 잠금 (멀티유저 동시 편집 방지) ──
+  // sessionId: 같은 사용자의 다른 탭 구분용
+  const sessionIdRef = useRef<string>(crypto.randomUUID());
+  type LockStatus = 'idle' | 'acquiring' | 'held' | 'blocked' | 'error';
+  const [lockStatus, setLockStatus] = useState<LockStatus>('idle');
+  const [blockedBy, setBlockedBy] = useState<CampLock | null>(null);
+  const canEdit = lockStatus === 'held';
 
   const weekLabel = format(store.weekStart, 'yyyy년 M월 d일', { locale: ko }) + ' 주';
 
@@ -87,6 +94,13 @@ export default function ScheduleCalendar() {
   const [saving, setSaving] = useState(false);
   const handleSave = useCallback(async () => {
     if (saving) return;
+    if (!canEdit) {
+      const reason = lockStatus === 'blocked'
+        ? `편집 권한 없음: ${blockedBy?.displayName ?? '다른 사용자'}님이 편집 중입니다.`
+        : '잠금 획득 전입니다. 잠시 후 다시 시도해주세요.';
+      alert(reason);
+      return;
+    }
     setSaving(true);
     try {
       const campId = useScheduleStore.getState().selectedCampId;
@@ -109,7 +123,7 @@ export default function ScheduleCalendar() {
     } finally {
       setSaving(false);
     }
-  }, [saving]);
+  }, [saving, canEdit, lockStatus, blockedBy]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -182,6 +196,79 @@ export default function ScheduleCalendar() {
     setRegularSortState(null);
     setBackupSortState(null);
   }, [store.selectedCampId]);
+
+  // ── 캠프 잠금 lifecycle (acquire → heartbeat → release) ──
+  // DB 측 stale 타임아웃 45s, 우리는 20s 간격 heartbeat
+  useEffect(() => {
+    const campId = store.selectedCampId;
+    if (!campId) {
+      setLockStatus('idle');
+      setBlockedBy(null);
+      return;
+    }
+
+    let cancelled = false;
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+    const sessionId = sessionIdRef.current;
+
+    const release = () => {
+      // fire-and-forget — 페이지 종료/캠프 전환 시 마지막 정리
+      import('../../lib/db').then(db => db.releaseLock(campId).catch(() => {}));
+    };
+
+    const tryAcquire = async () => {
+      setLockStatus('acquiring');
+      setBlockedBy(null);
+      try {
+        const db = await import('../../lib/db');
+        const result = await db.acquireLock(campId, sessionId);
+        if (cancelled) {
+          // 획득 도중 캠프가 바뀜 — 받은 잠금 즉시 해제
+          if (result.success) db.releaseLock(campId).catch(() => {});
+          return;
+        }
+        if (result.success) {
+          setLockStatus('held');
+          heartbeatTimer = setInterval(() => {
+            import('../../lib/db').then(db => db.heartbeatLock(campId).catch(() => {}));
+          }, 20000);
+        } else {
+          setLockStatus('blocked');
+          setBlockedBy(result.lock ?? null);
+        }
+      } catch {
+        if (!cancelled) setLockStatus('error');
+      }
+    };
+
+    tryAcquire();
+    window.addEventListener('beforeunload', release);
+
+    return () => {
+      cancelled = true;
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      window.removeEventListener('beforeunload', release);
+      release();
+    };
+  }, [store.selectedCampId]);
+
+  // blocked 상태에서 30초마다 잠금 재시도 (상대방이 종료했을 수 있음)
+  useEffect(() => {
+    if (lockStatus !== 'blocked') return;
+    const campId = store.selectedCampId;
+    if (!campId) return;
+    const retry = setInterval(async () => {
+      const db = await import('../../lib/db');
+      const result = await db.acquireLock(campId, sessionIdRef.current);
+      if (result.success) {
+        setLockStatus('held');
+        setBlockedBy(null);
+      } else if (result.lock) {
+        setBlockedBy(result.lock);
+      }
+    }, 30000);
+    return () => clearInterval(retry);
+  }, [lockStatus, store.selectedCampId]);
 
   // 로컬 순서 적용
   const orderedRegulars = useMemo(() => applyOrder(regulars, regularOrder), [regulars, regularOrder]);
@@ -319,6 +406,7 @@ export default function ScheduleCalendar() {
   /** 편집 확정 */
   function commitEdit() {
     if (!editing) return;
+    if (!canEdit) { setEditing(null); return; }
     const val = editValue.trim();
     if (val) {
       const routes = val.split(',').map((s) => s.trim()).filter(Boolean);
@@ -332,6 +420,7 @@ export default function ScheduleCalendar() {
   function cancelEdit() { setEditing(null); }
 
   function startEdit(workerId: string, date: string, defaultValue: string) {
+    if (!canEdit) return;
     setEditing({ workerId, date, defaultValue });
     setEditValue(defaultValue);
   }
@@ -339,6 +428,7 @@ export default function ScheduleCalendar() {
   /** 고정 요원 좌클릭: 근무→휴무→비움→근무 */
   function handleRegularClick(w: Worker, date: string) {
     if (editing) return;
+    if (!canEdit) return;
     const cell = store.getEffectiveCell(w.id, date);
     const status: CellStatus = cell?.status ?? 'work';
     switch (status) {
@@ -352,6 +442,7 @@ export default function ScheduleCalendar() {
   /** 백업 요원 좌클릭: 배정 해제 */
   function handleBackupClick(w: Worker, date: string) {
     if (editing) return;
+    if (!canEdit) return;
     const cell = store.getEffectiveCell(w.id, date);
     if (cell && (cell.status === 'work' || cell.status === 'custom')) {
       store.clearCell(w.id, date);
@@ -362,6 +453,7 @@ export default function ScheduleCalendar() {
   function handleRightClick(w: Worker, date: string, e: React.MouseEvent) {
     e.preventDefault();
     if (editing) return;
+    if (!canEdit) return;
     if (w.role === 'backup') {
       const uncovered = store.getUncoveredRoutes(date);
       startEdit(w.id, date, uncovered.join(', '));
@@ -692,6 +784,38 @@ export default function ScheduleCalendar() {
           <span className="legend-item"><span className="legend-box empty" />비움</span>
         </div>
       </div>
+
+      {/* 캠프 잠금 상태 배너 */}
+      {store.selectedCampId && lockStatus !== 'held' && (
+        <div
+          style={{
+            padding: '10px 14px',
+            margin: '8px 0',
+            borderRadius: 6,
+            fontSize: 13,
+            fontWeight: 500,
+            background:
+              lockStatus === 'blocked' ? '#fff4e5'
+              : lockStatus === 'error' ? '#ffe5e5'
+              : '#e8f4ff',
+            color:
+              lockStatus === 'blocked' ? '#8b5a00'
+              : lockStatus === 'error' ? '#8b0000'
+              : '#0a4d8b',
+            border:
+              lockStatus === 'blocked' ? '1px solid #f0c075'
+              : lockStatus === 'error' ? '1px solid #ff9999'
+              : '1px solid #99c2e5',
+          }}
+        >
+          {lockStatus === 'acquiring' && '🔓 잠금 획득 중...'}
+          {lockStatus === 'blocked' && (
+            <>🔒 <strong>{blockedBy?.displayName ?? '다른 사용자'}</strong>님이 편집 중입니다 (보기 전용). 30초마다 재시도.</>
+          )}
+          {lockStatus === 'error' && '⚠ 잠금 시스템 오류 — 페이지를 새로고침 해주세요.'}
+          {lockStatus === 'idle' && '캠프를 선택해주세요.'}
+        </div>
+      )}
 
       {/* 테이블 */}
       <div className="grid-table-wrap" ref={tableWrapRef}>
