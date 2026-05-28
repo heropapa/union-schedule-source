@@ -117,9 +117,10 @@ export default function ScheduleCalendar() {
       if (cells.length) await db.upsertCellsBatch(cells, campId);
 
       setToast('저장 완료 ✓');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('저장 실패:', err);
-      alert('저장 실패:\n' + (err?.message || '알 수 없는 오류'));
+      const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+      alert('저장 실패:\n' + msg);
     } finally {
       setSaving(false);
     }
@@ -166,8 +167,9 @@ export default function ScheduleCalendar() {
       link.href = dataUrl;
       link.click();
       setToast('이미지 저장 완료 ✓');
-    } catch (err: any) {
-      alert('이미지 생성 실패: ' + (err.message || '알 수 없는 오류'));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+      alert('이미지 생성 실패: ' + msg);
     }
 
     // 3) 원래 순서 복원

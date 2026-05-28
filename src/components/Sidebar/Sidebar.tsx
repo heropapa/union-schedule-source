@@ -121,7 +121,8 @@ export default function Sidebar() {
     // 게시 상태 로드
     import('../../lib/supabase').then(({ supabase }) => {
       supabase.from('camps').select('id,published').then(({ data }) => {
-        const pubSet = new Set((data ?? []).filter((r: any) => r.published).map((r: any) => r.id));
+        const rows = (data ?? []) as { id: string; published: boolean }[];
+        const pubSet = new Set(rows.filter((r) => r.published).map((r) => r.id));
         setPublishedCamps(pubSet);
       });
     });

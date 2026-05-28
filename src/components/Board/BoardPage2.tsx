@@ -2,9 +2,17 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { format, addDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addMonths, isSameMonth } from 'date-fns';
 import { ko } from 'date-fns/locale/ko';
-import type { Worker, Route, ScheduleCell, Camp } from '../../types';
+import type { Worker, Route, ScheduleCell, Camp, CellStatus, WorkerRole } from '../../types';
 import './BoardPage.css';
 import './BoardPage2.css';
+
+type CampRow = { id: string; name: string; wave: string; color: string; company_id: string };
+type WorkerRow = {
+  id: string; name: string; login_id: string; camp_id: string;
+  role: WorkerRole; assigned_routes: string[] | null; rotations: string[] | null;
+};
+type RouteRow = { route_id: string; sub_routes: string[] | null };
+type CellRow = { worker_id: string; date: string; status: CellStatus; routes: string[] | null };
 
 /**
  * 공개 게시판용 Supabase 클라이언트.
@@ -105,14 +113,14 @@ export default function BoardPage2() {
           .order('sort_order');
         if (campErr) throw new Error('캠프 로드 실패: ' + campErr.message);
 
-        const camps: Camp[] = (campRows ?? []).map((r: any) => ({
+        const camps: Camp[] = (campRows ?? []).map((r: CampRow) => ({
           id: r.id, name: r.name, wave: r.wave, color: r.color, companyId: r.company_id,
         }));
 
         if (camps.length === 0) {
           // published 캠프가 없으면 전체 캠프 로드 (하위호환)
           const { data: allCampRows } = await boardSupabase.from('camps').select('*').order('sort_order');
-          camps.push(...(allCampRows ?? []).map((r: any) => ({
+          camps.push(...(allCampRows ?? []).map((r: CampRow) => ({
             id: r.id, name: r.name, wave: r.wave, color: r.color, companyId: r.company_id,
           })));
         }
@@ -129,17 +137,17 @@ export default function BoardPage2() {
             boardSupabase.from('schedule_cells').select('*').eq('camp_id', camp.id),
           ]);
 
-          const workers = (wRes.data ?? []).map((r: any) => ({
+          const workers: Worker[] = (wRes.data ?? []).map((r: WorkerRow) => ({
             id: r.id, name: r.name, loginId: r.login_id, campId: r.camp_id,
             role: r.role, assignedRoutes: r.assigned_routes ?? [], rotations: r.rotations ?? [],
           }));
           allWorkers.push(...workers);
 
-          allRoutes[camp.id] = (rRes.data ?? []).map((r: any) => ({
+          allRoutes[camp.id] = (rRes.data ?? []).map((r: RouteRow) => ({
             id: r.route_id, subRoutes: r.sub_routes ?? [],
           }));
 
-          for (const r of cRes.data ?? []) {
+          for (const r of (cRes.data ?? []) as CellRow[]) {
             allCells[`${r.worker_id}::${r.date}`] = {
               workerId: r.worker_id, date: r.date, status: r.status, routes: r.routes ?? [],
             };
@@ -147,11 +155,11 @@ export default function BoardPage2() {
         }));
 
         setSnap({ workers: allWorkers, routes: allRoutes, cells: allCells, camps });
-      } catch (e: any) {
+      } catch (e: unknown) {
         // RLS 정책이 누락된 경우 캠프 SELECT가 0행으로 와서 빈 화면이 됨.
         // 명시적 에러보다 게시판이 비어보이는 게 더 흔한 증상이므로
         // supabase/rls-public-board.sql 적용 여부부터 확인할 것.
-        setError(e.message || '알 수 없는 오류');
+        setError(e instanceof Error ? e.message : '알 수 없는 오류');
       } finally {
         setLoading(false);
       }
