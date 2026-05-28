@@ -112,6 +112,17 @@ deps 누락이지만 무차별 추가하면 useEffect 재실행 빈도가 의도
 - `supabase.ts` / `db.ts`가 dynamic+static 동시 import → chunk 분할 안 됨
 - bundle 768KB → 500KB 임계 초과. manualChunks 또는 라우트 단위 lazy load 검토
 
+## 다음 단계: v1.1 (대대적 기능 추가)
+
+v1.0은 baseline cleanup 완료. v1.1 스펙은 사용자와 별도 논의 후 결정.
+
+논의 시작점 (memory `project_schedule_redesign.md` 기준):
+- 게시 기능 확장 (현재: 캠프 단위 published 토글 / 다음: 주간/일간 단위?)
+- 캠프 잠금 정책 (현재: 단일 사용자 / 다음: read-only viewer 다중 접속?)
+- 캠프 메타 관리 분리 (현재: Sidebar 인라인 / 다음: 별도 admin 화면?)
+- 모바일 뷰
+- 알림/공지사항
+
 ## 9명 사용자 정보
 
 관리자 9명: 김봉상, 백승엽, 문민중, 정인호, 조용환, 이정길, 전용호, 최아라, 임지현 + admin 1명. 비밀번호 통일 `123456` (Supabase 최소 6자 요구).
