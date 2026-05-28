@@ -7,11 +7,12 @@ import { DAY_LABELS, COMPANIES } from '../../types';
 import type { Worker, CellStatus, CampLock } from '../../types';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale/ko';
-import { exportScheduleExcel } from '../../utils/exportExcel';
-import { exportAdminExcel } from '../../utils/exportAdminExcel';
+// xlsx는 282KB로 무거워서, 엑셀 export 버튼을 누르는 순간에만 동적 로드한다.
+// (정적 import로 두면 initial bundle에 항상 포함되어 첫 화면 로딩이 느려짐)
 import { toPng } from 'html-to-image';
 import { useAuthStore } from '../../store/useAuthStore';
 import { toDisplayName } from '../../lib/supabase';
+import * as db from '../../lib/db';
 import './ScheduleGrid.css';
 
 /** 편집 중인 셀 정보 */
@@ -119,7 +120,6 @@ export default function ScheduleCalendar() {
       const routes = ws.routes[campId] ?? [];
       const cells = Object.values(ss.cells).filter(c => workers.some(w => w.id === c.workerId));
 
-      const db = await import('../../lib/db');
       await Promise.all(workers.map((w, i) => db.upsertWorker(w, i)));
       await Promise.all(routes.map((r, i) => db.upsertRoute(campId, r, i)));
       if (cells.length) await db.upsertCellsBatch(cells, campId);
@@ -218,7 +218,7 @@ export default function ScheduleCalendar() {
     }
     // 권한 없는 viewer가 캠프를 둘러볼 때 lock을 잡으면 진짜 편집자가
     // blocked가 되므로, 권한 확인 전엔 acquire 자체를 시도하지 않는다.
-    if (!auth.canEditCamp(campId)) {
+    if (!hasCampPermission) {
       setLockStatus('no-permission');
       setBlockedBy(null);
       return;
@@ -230,14 +230,13 @@ export default function ScheduleCalendar() {
 
     const release = () => {
       // fire-and-forget — 페이지 종료/캠프 전환 시 마지막 정리
-      import('../../lib/db').then(db => db.releaseLock(campId).catch(() => {}));
+      db.releaseLock(campId).catch(() => {});
     };
 
     const tryAcquire = async () => {
       setLockStatus('acquiring');
       setBlockedBy(null);
       try {
-        const db = await import('../../lib/db');
         const result = await db.acquireLock(campId, sessionId);
         if (cancelled) {
           // 획득 도중 캠프가 바뀜 — 받은 잠금 즉시 해제
@@ -247,7 +246,7 @@ export default function ScheduleCalendar() {
         if (result.success) {
           setLockStatus('held');
           heartbeatTimer = setInterval(() => {
-            import('../../lib/db').then(db => db.heartbeatLock(campId).catch(() => {}));
+            db.heartbeatLock(campId).catch(() => {});
           }, 20000);
         } else {
           setLockStatus('blocked');
@@ -267,7 +266,9 @@ export default function ScheduleCalendar() {
       window.removeEventListener('beforeunload', release);
       release();
     };
-  }, [store.selectedCampId, auth]);
+    // hasCampPermission만 트래킹 — auth 전체를 dep에 두면 무관한 상태
+    // (loading/error 등) 변화에도 lock을 재취득하게 된다.
+  }, [store.selectedCampId, hasCampPermission]);
 
   // blocked 상태에서 30초마다 잠금 재시도 (상대방이 종료했을 수 있음)
   useEffect(() => {
@@ -275,7 +276,6 @@ export default function ScheduleCalendar() {
     const campId = store.selectedCampId;
     if (!campId) return;
     const retry = setInterval(async () => {
-      const db = await import('../../lib/db');
       const result = await db.acquireLock(campId, sessionIdRef.current);
       if (result.success) {
         setLockStatus('held');
@@ -526,6 +526,7 @@ export default function ScheduleCalendar() {
   function handleCellDrop(w: Worker, date: string, e: React.DragEvent) {
     e.preventDefault();
     setDragHoverWorkerId(null);
+    if (!canEdit) { setDragging(null); return; }
     if (!dragging || dragging.date !== date) return;
 
     const cell = store.getEffectiveCell(w.id, date);
@@ -544,6 +545,7 @@ export default function ScheduleCalendar() {
 
   /** 백업 자동채우기: 비어있는 날에 담당 미커버 라우트를 한번에 배정 */
   function handleAutoFillBackup(w: Worker) {
+    if (!canEdit) return;
     if (w.assignedRoutes.length === 0) return;
     let filled = 0;
     for (const d of store.weekDates) {
@@ -740,9 +742,10 @@ export default function ScheduleCalendar() {
             </button>
             {showExportMenu && (
               <div className="export-dropdown-menu">
-                <button onClick={() => {
+                <button onClick={async () => {
                   setShowExportMenu(false);
                   const campName = camps.find((c) => c.id === store.selectedCampId)?.name ?? store.selectedCampId;
+                  const { exportScheduleExcel } = await import('../../utils/exportExcel');
                   exportScheduleExcel({
                     campName,
                     weekLabel,
@@ -756,10 +759,11 @@ export default function ScheduleCalendar() {
                 }}>
                   &#x1F4CA; 일반 양식
                 </button>
-                <button onClick={() => {
+                <button onClick={async () => {
                   setShowExportMenu(false);
                   const camp = camps.find((c) => c.id === store.selectedCampId);
                   const company = COMPANIES.find((co) => co.id === (camp?.companyId ?? 'union')) ?? COMPANIES[0];
+                  const { exportAdminExcel } = await import('../../utils/exportAdminExcel');
                   exportAdminExcel({
                     config: {
                       vendorName: company.vendorName,

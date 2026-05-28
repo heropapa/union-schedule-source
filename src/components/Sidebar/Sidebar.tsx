@@ -7,6 +7,7 @@ import { ROTATIONS_BY_WAVE, COMPANIES } from '../../types';
 import { useAuthStore } from '../../store/useAuthStore';
 import * as db from '../../lib/db';
 import type { UserProfile } from '../../lib/db';
+import { supabase } from '../../lib/supabase';
 import './Sidebar.css';
 
 /** ID 배열 재정렬 */
@@ -131,12 +132,10 @@ export default function Sidebar() {
     }).catch(() => {});
     db.fetchPermissions().then(setPermissions).catch(() => {});
     // 게시 상태 로드
-    import('../../lib/supabase').then(({ supabase }) => {
-      supabase.from('camps').select('id,published').then(({ data }) => {
-        const rows = (data ?? []) as { id: string; published: boolean }[];
-        const pubSet = new Set(rows.filter((r) => r.published).map((r) => r.id));
-        setPublishedCamps(pubSet);
-      });
+    supabase.from('camps').select('id,published').then(({ data }) => {
+      const rows = (data ?? []) as { id: string; published: boolean }[];
+      const pubSet = new Set(rows.filter((r) => r.published).map((r) => r.id));
+      setPublishedCamps(pubSet);
     });
   }, [isAdmin]);
 
@@ -179,8 +178,17 @@ export default function Sidebar() {
   const hasCampInCompany = !!selectedCamp; // 현재 업체에 선택된 캠프가 있는지
   const campWave = selectedCamp?.wave ?? 'WAVE1';
   const allRotations = ROTATIONS_BY_WAVE[campWave] ?? [];
-  const regulars = hasCampInCompany ? store.getRegularWorkers(selectedCampId) : [];
-  const backups = hasCampInCompany ? store.getBackupWorkers(selectedCampId) : [];
+  // 아래 useMemo(orderedRegulars/Backups)의 deps 안정성을 위해 직접 메모이즈.
+  // store의 getter는 같은 입력에 대해 매 호출마다 동일 참조를 보장하지 않으므로
+  // 캠프/store 상태가 바뀔 때만 새 배열을 만들도록 가둔다.
+  const regulars = useMemo(
+    () => (hasCampInCompany ? store.getRegularWorkers(selectedCampId) : []),
+    [hasCampInCompany, selectedCampId, store],
+  );
+  const backups = useMemo(
+    () => (hasCampInCompany ? store.getBackupWorkers(selectedCampId) : []),
+    [hasCampInCompany, selectedCampId, store],
+  );
   const campRoutes = hasCampInCompany ? store.getRoutes(selectedCampId) : [];
 
   // ── 캠프 추가 ──
@@ -193,23 +201,33 @@ export default function Sidebar() {
   // ── 캠프 편집 (이름 + wave) ──
   const [editingCamp, setEditingCamp] = useState<{ id: string; name: string; wave: string } | null>(null);
   const campEditNameRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { if (editingCamp) campEditNameRef.current?.focus(); }, [editingCamp?.id]);
+  // 편집 진입 시점에만 포커스. id가 바뀔 때만 발동시켜 name/wave 입력 중 재포커스 방지.
+  useEffect(() => { if (editingCamp?.id) campEditNameRef.current?.focus(); }, [editingCamp?.id]);
 
   // ── 로컬 순서 상태 (사이드바 전용) ──
-  const [regularOrder, setRegularOrder] = useState<string[]>([]);
-  const [backupOrder, setBackupOrder] = useState<string[]>([]);
+  // 캠프 전환 시 store의 저장된 순서로 초기화하고 정렬 표시를 리셋한다.
+  // React 19 권장: useEffect + setState 대신 렌더 중 prev-state 비교로 처리해
+  // 외부 store 갱신이 사용자의 로컬 정렬을 덮어쓰지 않도록 한다.
+  const [regularOrder, setRegularOrder] = useState<string[]>(
+    () => useWorkerStore.getState().getOrder(selectedCampId, 'sidebar', 'regular'),
+  );
+  const [backupOrder, setBackupOrder] = useState<string[]>(
+    () => useWorkerStore.getState().getOrder(selectedCampId, 'sidebar', 'backup'),
+  );
 
   // 정렬 방향 표시용 (아이콘 전용, 정렬 자체는 order 배열로 처리)
   const [regularSortDir, setRegularSortDir] = useState<{ by: 'name' | 'routes'; dir: 'asc' | 'desc' } | null>(null);
   const [backupSortDir, setBackupSortDir] = useState<{ dir: 'asc' | 'desc' } | null>(null);
 
-  // 캠프 변경 시 스토어에서 로컬 순서 복원
-  useEffect(() => {
-    setRegularOrder(store.getOrder(selectedCampId, 'sidebar', 'regular'));
-    setBackupOrder(store.getOrder(selectedCampId, 'sidebar', 'backup'));
+  const [lastSyncedCampId, setLastSyncedCampId] = useState(selectedCampId);
+  if (lastSyncedCampId !== selectedCampId) {
+    const ws = useWorkerStore.getState();
+    setLastSyncedCampId(selectedCampId);
+    setRegularOrder(ws.getOrder(selectedCampId, 'sidebar', 'regular'));
+    setBackupOrder(ws.getOrder(selectedCampId, 'sidebar', 'backup'));
     setRegularSortDir(null);
     setBackupSortDir(null);
-  }, [selectedCampId]);
+  }
 
   const orderedRegulars = useMemo(() => applyOrder(regulars, regularOrder), [regulars, regularOrder]);
   const orderedBackups = useMemo(() => applyOrder(backups, backupOrder), [backups, backupOrder]);
@@ -334,12 +352,13 @@ export default function Sidebar() {
     else if (addingType && nameInputRef.current) nameInputRef.current.focus();
   }, [addingType]);
 
+  // 편집 진입 시점에만 포커스. id가 바뀔 때만 발동시켜 입력 중 재포커스 방지.
   useEffect(() => {
-    if (editingWorker) workerEditNameRef.current?.focus();
+    if (editingWorker?.id) workerEditNameRef.current?.focus();
   }, [editingWorker?.id]);
 
   useEffect(() => {
-    if (editingSubRoutes && subRouteEditRef.current) {
+    if (editingSubRoutes?.routeId && subRouteEditRef.current) {
       subRouteEditRef.current.focus();
       subRouteEditRef.current.select();
     }
@@ -563,10 +582,9 @@ export default function Sidebar() {
                     if (!confirm(`"${camp.name}" 캠프를 삭제하시겠습니까?\n소속 기사, 라우트, 스케쥴이 모두 삭제됩니다.`)) return;
                     const pw = prompt('삭제를 확인하려면 현재 계정의 비밀번호를 입력하세요:');
                     if (!pw) return;
-                    const { supabase: sb } = await import('../../lib/supabase');
                     const userEmail = useAuthStore.getState().user?.email;
                     if (!userEmail) return;
-                    const { error: authErr } = await sb.auth.signInWithPassword({ email: userEmail, password: pw });
+                    const { error: authErr } = await supabase.auth.signInWithPassword({ email: userEmail, password: pw });
                     if (authErr) { alert('비밀번호가 일치하지 않습니다.'); return; }
                     store.removeCamp(camp.id);
                   }}
