@@ -197,7 +197,7 @@ export default function ScheduleCalendar() {
     setBackupOrder(workerStore.getOrder(store.selectedCampId, 'table', 'backup'));
     setRegularSortState(null);
     setBackupSortState(null);
-  }, [store.selectedCampId]);
+  }, [store.selectedCampId, workerStore]);
 
   // ── 캠프 잠금 lifecycle (acquire → heartbeat → release) ──
   // DB 측 stale 타임아웃 45s, 우리는 20s 간격 heartbeat
@@ -277,16 +277,16 @@ export default function ScheduleCalendar() {
   const orderedBackups = useMemo(() => applyOrder(backups, backupOrder), [backups, backupOrder]);
 
   /** 순서를 로컬 + 스토어에 동시 저장하고 dirty 표시 */
-  function syncRegularOrder(ids: string[]) {
+  const syncRegularOrder = useCallback((ids: string[]) => {
     setRegularOrder(ids);
     workerStore.setOrder(store.selectedCampId, 'table', 'regular', ids);
     markDirty();
-  }
-  function syncBackupOrder(ids: string[]) {
+  }, [workerStore, store.selectedCampId]);
+  const syncBackupOrder = useCallback((ids: string[]) => {
     setBackupOrder(ids);
     workerStore.setOrder(store.selectedCampId, 'table', 'backup', ids);
     markDirty();
-  }
+  }, [workerStore, store.selectedCampId]);
 
   // ── 행 드래그 (로컬 순서 변경, 스토어 불변) ──
   const rowDragIdRef = useRef<string | null>(null);
@@ -338,7 +338,7 @@ export default function ScheduleCalendar() {
       syncBackupOrder(reorderIds(order, dragId, overId));
       setBackupSortState(null);
     }
-  }, [regulars, backups, regularOrder, backupOrder]);
+  }, [regulars, backups, regularOrder, backupOrder, syncRegularOrder, syncBackupOrder]);
 
   const handleRowDragEnd = useCallback(() => {
     rowDragIdRef.current = null;

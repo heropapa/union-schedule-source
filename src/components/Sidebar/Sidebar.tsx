@@ -34,7 +34,9 @@ function useDragReorder(onReorder: (dragId: string, overId: string) => void) {
   const dragIdRef = useRef<string | null>(null);
   const overIdRef = useRef<string | null>(null);
   const onReorderRef = useRef(onReorder);
-  onReorderRef.current = onReorder;
+  useEffect(() => {
+    onReorderRef.current = onReorder;
+  }, [onReorder]);
   const [dragOver, setDragOver] = useState<{ id: string; pos: 'above' | 'below' } | null>(null);
 
   const reset = useCallback(() => {
