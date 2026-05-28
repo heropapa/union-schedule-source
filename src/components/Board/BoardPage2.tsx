@@ -6,11 +6,18 @@ import type { Worker, Route, ScheduleCell, Camp } from '../../types';
 import './BoardPage.css';
 import './BoardPage2.css';
 
-/* ── atone 계정 정보 ── */
-const ATONE_EMAIL = 'atone@schedule.local';
-const ATONE_PW = '150527';
-const ATONE_UID = 'a3451236-bf21-410f-96e3-57883c252025';
-
+/**
+ * 공개 게시판용 Supabase 클라이언트.
+ *
+ * 이전엔 atone 전용 계정(email/pw 하드코딩)으로 로그인해서 데이터를
+ * 읽었으나, 비밀번호가 Vite 번들에 평문 노출되는 문제로 anon key + RLS
+ * 정책으로 전환 (2026-05-27). 필요한 RLS 정책은
+ *   supabase/rls-public-board.sql
+ * 에 있으니 Supabase 대시보드에서 먼저 적용해야 함.
+ *
+ * 익명 세션이므로 persistSession/autoRefreshToken 모두 비활성화 —
+ * admin이 같은 브라우저에서 사용 중일 때 세션 간섭 방지.
+ */
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
@@ -86,17 +93,11 @@ export default function BoardPage2() {
     return [m1, m2];
   }, [today]);
 
-  /* 데이터 로드 — DB에서 published 캠프만 로드 */
+  /* 데이터 로드 — anon key로 published 캠프만 RLS 통해 SELECT */
   useEffect(() => {
     (async () => {
       try {
-        // atone 계정으로 로그인 (DB 읽기 권한)
-        const { error: authErr } = await boardSupabase.auth.signInWithPassword({
-          email: ATONE_EMAIL, password: ATONE_PW,
-        });
-        if (authErr) throw new Error('인증 실패: ' + authErr.message);
-
-        // 1) published 캠프 목록 로드
+        // 1) published 캠프 목록 로드 (RLS: anon_select_published_camps)
         const { data: campRows, error: campErr } = await boardSupabase
           .from('camps')
           .select('*')
@@ -147,10 +148,12 @@ export default function BoardPage2() {
 
         setSnap({ workers: allWorkers, routes: allRoutes, cells: allCells, camps });
       } catch (e: any) {
+        // RLS 정책이 누락된 경우 캠프 SELECT가 0행으로 와서 빈 화면이 됨.
+        // 명시적 에러보다 게시판이 비어보이는 게 더 흔한 증상이므로
+        // supabase/rls-public-board.sql 적용 여부부터 확인할 것.
         setError(e.message || '알 수 없는 오류');
       } finally {
         setLoading(false);
-        boardSupabase.auth.signOut();
       }
     })();
   }, []);
