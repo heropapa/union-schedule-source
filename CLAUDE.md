@@ -78,44 +78,39 @@ supabase/
 
 ## 2026-05-27 작업 (Top 3 Critical Fix)
 
-세션이 강제 종료돼 새 세션으로 이어감. 다음 커밋들이 로컬에 있음 (push 필요):
-
 | Commit | 내용 |
 |---|---|
 | `1bcf939` | **fix(lock)**: 캠프 잠금 wire-up. acquireLock/heartbeat(20s)/release를 ScheduleCalendar에 연결. blocked 시 30s 재시도 + 배너 UI + canEdit 가드 |
 | `0128ec9` | **fix(auth)**: LoginPage의 dead signup 모드 제거 (-95줄). admin이 Supabase 대시보드에서 직접 계정 생성하는 워크플로우 유지 |
 | `9853972` | **fix(board)**: BoardPage2의 ATONE_PW='150527' 평문 하드코딩 제거. anon key + RLS로 전환. `supabase/rls-public-board.sql` 추가. BoardPage.tsx(구버전) 삭제 |
 
-## 다음 세션 시작 시 즉시 할 일
+## 2026-05-28 작업 (v1.0 baseline cleanup, v1.1 진입 직전)
 
-### 1. 커밋 push
-```bash
-git push origin master
-```
+| Commit | 내용 |
+|---|---|
+| `49b5bf0` | **chore**: tracked 잡파일 제거 (`_.zip`, `src.zip`, `_preview_dist/`, `schedule-v2-*.xlsx`). `.gitignore` 확장 |
+| `c99c9cf` | **fix(ts)**: typecheck 에러 6건 해결 (미사용 import/var, `header:1` sheet_to_json generic 타입) |
+| `b26e970` | **fix(lint)**: `any` 9건 → 구체 row 타입(`CampRow`/`WorkerRow`/...) + regex useless escape |
+| `2bb9a92` | **fix(react)**: Sidebar.useDragReorder ref-during-render → useEffect. ScheduleCalendar handleRowDrop useCallback wrap + workerStore deps |
+| `145359a` | **fix(auth)**: Issue #4 권한 게이팅 wire-up. canEdit = lock∧권한, lock acquire 자체에 권한 게이트, Sidebar mutation들에 `withCampPermission()` |
 
-### 2. Supabase 측 조치 (필수, 안 하면 게시판 빈 화면)
-- Supabase Dashboard → SQL Editor → `supabase/rls-public-board.sql` 전체 실행
-- Authentication → Users → `atone@schedule.local` 삭제
+## Supabase 측 조치 (배포 전 필수)
 
-### 3. 배포
-`union-schedule-test1` repo에 빌드 결과 push (기존 워크플로우대로)
+- SQL Editor → `supabase/rls-public-board.sql` 전체 실행 (게시판 RLS)
+- Authentication → Users → `atone@schedule.local` 삭제 권장 (anon key 전환으로 더 이상 필요 없음)
 
-## 다음 우선순위 (Issue #4, #5)
+## 알려진 잔여 cleanup (위험도 낮음, 일괄 처리 가능)
 
-### Issue #4 🟠 권한 게이팅 (canEditCamp 활용)
-`useAuthStore.canEditCamp(campId)` 함수가 정의돼 있지만 호출 0건. viewer 권한자도 모든 캠프 셀 클릭/편집 가능한 상태. 다음 위치에 게이팅 필요:
-- `ScheduleCalendar.tsx`의 `handleSave`, `handleRegularClick`, `handleBackupClick`, `handleRightClick`, `startEdit`
-- `Sidebar.tsx`의 캠프 추가/삭제/편집 버튼, 기사 추가/삭제, 라우트 편집
+### React deps warnings (Sidebar.tsx 6건)
+deps 누락이지만 무차별 추가하면 useEffect 재실행 빈도가 의도와 달라질 수 있어 보수적으로 남김:
+- `regulars`/`backups` conditional → useMemo wrap 필요 (L182, L183)
+- editingCamp / editingWorker / editingSubRoutes / store deps (L196, L212, L339, L346)
 
-### Issue #5 🟠 React 안티패턴 정리
-- `Sidebar.tsx:37` — `onReorderRef.current = onReorder;` render 중 ref 업데이트 → useEffect로 이동
-- `ScheduleCalendar.tsx:184` — useEffect deps에 `workerStore` 누락
-- `ScheduleCalendar.tsx:252` — `handleRowDrop`의 deps에 `syncBackupOrder`, `syncRegularOrder` 누락
+각각 effect 의도를 한 번씩 확인하고 deps 추가 vs `// eslint-disable-next-line react-hooks/exhaustive-deps` 결정 필요.
 
-### 부수 정리
-- TS error 6건 (대부분 미사용 vars: exportExcel.ts, db.ts의 SubRoute, importAdminExcel.ts의 타입 단언)
-- ESLint 21건 (any 타입, unused vars, react-hooks/exhaustive-deps)
-- git tracked 잡파일: `_.zip`, `_ (2).zip`, `src.zip`, `_preview_dist/`, `통영*.xlsx`, `schedule-v2-*.xlsx` → `git rm` + `.gitignore` 추가
+### 빌드 경고
+- `supabase.ts` / `db.ts`가 dynamic+static 동시 import → chunk 분할 안 됨
+- bundle 768KB → 500KB 임계 초과. manualChunks 또는 라우트 단위 lazy load 검토
 
 ## 9명 사용자 정보
 
