@@ -4,6 +4,8 @@
 주간 스케쥴 짜고 게시판으로 발행하는 도구.
 
 - **이름 유래**: **유**니온**스**케쥴**프**로그램 → 유스프 1.0 (확정 2026-05-27)
+- **로컬 경로**: `C:\Users\heropapa\Documents\my_automation\union-schedule-source\`
+  (my_automation 우산 폴더 안 — 정산/스케쥴 데이터와 같은 위치)
 - **소스 repo**: https://github.com/heropapa/union-schedule-source (이 repo)
 - **배포 repo**: https://github.com/heropapa/union-schedule-test1 (GitHub Pages용 빌드 산출물)
 - **배포 URL**: https://heropapa.github.io/union-schedule-test1/
