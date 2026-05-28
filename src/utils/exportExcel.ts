@@ -57,7 +57,7 @@ export function exportScheduleExcel(opts: ExportOptions) {
   const dayHeaders = weekDates.map((d, i) => `${DAY_LABELS[i]}(${d.slice(5)})`);
   rows.push(['구분', '이름', '아이디', '담당 라우트', ...dayHeaders]);
 
-  // 고정 기사
+  // 고정 인원
   for (const w of regulars) {
     const dayCells = weekDates.map((d) => {
       const cell = getEffectiveCell(w.id, d);

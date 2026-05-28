@@ -377,7 +377,7 @@ export default function ScheduleCalendar() {
       return dir === 'asc' ? cmp : -cmp;
     });
 
-  /** 고정 기사 정렬 */
+  /** 고정 인원 정렬 */
   function handleRegularSort(by: 'name' | 'routes') {
     const prev = regularSortState;
     const next = (!prev || prev.by !== by) ? { by, dir: 'asc' as const }
@@ -869,7 +869,7 @@ export default function ScheduleCalendar() {
             </tr>
           </thead>
           <tbody>
-            {/* 고정 기사 */}
+            {/* 고정 인원 */}
             {displayRegulars.map((w) => {
               const violation = store.hasWeeklyOffViolation(w.id);
               return (

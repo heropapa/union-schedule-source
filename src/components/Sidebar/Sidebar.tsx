@@ -684,13 +684,13 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* 고정 기사 */}
+      {/* 고정 인원 */}
       {hasCampInCompany && <div className="sidebar-section">
         <h3 className="section-title">
-          고정 기사 ({regulars.length}명)
+          고정 인원 ({regulars.length}명)
           <button className="add-btn" onClick={() => handleSortRegulars('name')} title="이름순 정렬">{regularSortIcon('name')}</button>
           <button className="add-btn" onClick={() => handleSortRegulars('routes')} title="라우트순 정렬">R{regularSortIcon('routes')}</button>
-          {<button className="add-btn" onClick={() => handleAdd('regular')} title="고정 기사 추가">+</button>}
+          {<button className="add-btn" onClick={() => handleAdd('regular')} title="고정 인원 추가">+</button>}
         </h3>
         <ul className="worker-list">
           {orderedRegulars.map((w) => (
