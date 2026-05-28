@@ -54,10 +54,13 @@ export default function ScheduleCalendar() {
   // ── 캠프 잠금 (멀티유저 동시 편집 방지) ──
   // sessionId: 같은 사용자의 다른 탭 구분용
   const sessionIdRef = useRef<string>(crypto.randomUUID());
-  type LockStatus = 'idle' | 'acquiring' | 'held' | 'blocked' | 'error';
+  type LockStatus = 'idle' | 'acquiring' | 'held' | 'blocked' | 'error' | 'no-permission';
   const [lockStatus, setLockStatus] = useState<LockStatus>('idle');
   const [blockedBy, setBlockedBy] = useState<CampLock | null>(null);
-  const canEdit = lockStatus === 'held';
+  // viewer 권한자가 권한 없는 캠프를 봐도 lock을 잡지 않게 하고,
+  // canEdit으로 셀/우클릭/저장 가드까지 한 번에 막는다.
+  const hasCampPermission = store.selectedCampId ? auth.canEditCamp(store.selectedCampId) : false;
+  const canEdit = lockStatus === 'held' && hasCampPermission;
 
   const weekLabel = format(store.weekStart, 'yyyy년 M월 d일', { locale: ko }) + ' 주';
 
@@ -95,9 +98,14 @@ export default function ScheduleCalendar() {
   const handleSave = useCallback(async () => {
     if (saving) return;
     if (!canEdit) {
-      const reason = lockStatus === 'blocked'
-        ? `편집 권한 없음: ${blockedBy?.displayName ?? '다른 사용자'}님이 편집 중입니다.`
-        : '잠금 획득 전입니다. 잠시 후 다시 시도해주세요.';
+      let reason: string;
+      if (!hasCampPermission) {
+        reason = '이 캠프에 대한 편집 권한이 없습니다. 관리자에게 권한을 요청하세요.';
+      } else if (lockStatus === 'blocked') {
+        reason = `편집 권한 없음: ${blockedBy?.displayName ?? '다른 사용자'}님이 편집 중입니다.`;
+      } else {
+        reason = '잠금 획득 전입니다. 잠시 후 다시 시도해주세요.';
+      }
       alert(reason);
       return;
     }
@@ -124,7 +132,7 @@ export default function ScheduleCalendar() {
     } finally {
       setSaving(false);
     }
-  }, [saving, canEdit, lockStatus, blockedBy]);
+  }, [saving, canEdit, hasCampPermission, lockStatus, blockedBy]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -208,6 +216,13 @@ export default function ScheduleCalendar() {
       setBlockedBy(null);
       return;
     }
+    // 권한 없는 viewer가 캠프를 둘러볼 때 lock을 잡으면 진짜 편집자가
+    // blocked가 되므로, 권한 확인 전엔 acquire 자체를 시도하지 않는다.
+    if (!auth.canEditCamp(campId)) {
+      setLockStatus('no-permission');
+      setBlockedBy(null);
+      return;
+    }
 
     let cancelled = false;
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -252,7 +267,7 @@ export default function ScheduleCalendar() {
       window.removeEventListener('beforeunload', release);
       release();
     };
-  }, [store.selectedCampId]);
+  }, [store.selectedCampId, auth]);
 
   // blocked 상태에서 30초마다 잠금 재시도 (상대방이 종료했을 수 있음)
   useEffect(() => {
@@ -799,14 +814,17 @@ export default function ScheduleCalendar() {
             background:
               lockStatus === 'blocked' ? '#fff4e5'
               : lockStatus === 'error' ? '#ffe5e5'
+              : lockStatus === 'no-permission' ? '#f0f0f0'
               : '#e8f4ff',
             color:
               lockStatus === 'blocked' ? '#8b5a00'
               : lockStatus === 'error' ? '#8b0000'
+              : lockStatus === 'no-permission' ? '#555'
               : '#0a4d8b',
             border:
               lockStatus === 'blocked' ? '1px solid #f0c075'
               : lockStatus === 'error' ? '1px solid #ff9999'
+              : lockStatus === 'no-permission' ? '1px solid #ccc'
               : '1px solid #99c2e5',
           }}
         >
@@ -816,6 +834,7 @@ export default function ScheduleCalendar() {
           )}
           {lockStatus === 'error' && '⚠ 잠금 시스템 오류 — 페이지를 새로고침 해주세요.'}
           {lockStatus === 'idle' && '캠프를 선택해주세요.'}
+          {lockStatus === 'no-permission' && '👁 이 캠프는 보기 전용입니다. 편집 권한은 관리자에게 요청하세요.'}
         </div>
       )}
 

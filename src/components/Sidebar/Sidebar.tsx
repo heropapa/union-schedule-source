@@ -103,7 +103,17 @@ export default function Sidebar() {
     }
   };
 
-  const isAdmin = useAuthStore().isAdmin();
+  const auth = useAuthStore();
+  const isAdmin = auth.isAdmin();
+  const canEditSelectedCamp = selectedCampId ? auth.canEditCamp(selectedCampId) : false;
+  /** 선택된 캠프에 대한 편집 권한이 있을 때만 mutation 실행. 없으면 1회 알림. */
+  function withCampPermission(action: () => void) {
+    if (!canEditSelectedCamp) {
+      alert('이 캠프에 대한 편집 권한이 없습니다. 관리자에게 권한을 요청하세요.');
+      return;
+    }
+    action();
+  }
 
   // ── 권한 관리 (admin 전용) ──
   const [permDropdownCamp, setPermDropdownCamp] = useState<string | null>(null);
@@ -345,15 +355,19 @@ export default function Sidebar() {
   function commitWorkerAdd() {
     const name = addName.trim();
     if (!name) { cancelAdd(); return; }
-    store.addWorker(name, selectedCampId, addingType as WorkerRole, addLoginId.trim());
+    withCampPermission(() => {
+      store.addWorker(name, selectedCampId, addingType as WorkerRole, addLoginId.trim());
+    });
     cancelAdd();
   }
 
   function commitRouteAdd() {
     const val = addRouteValue.trim();
     if (!val) { cancelAdd(); return; }
-    const { routeId, suffixes } = parseRouteInput(val);
-    store.addRoute(selectedCampId, routeId, suffixes);
+    withCampPermission(() => {
+      const { routeId, suffixes } = parseRouteInput(val);
+      store.addRoute(selectedCampId, routeId, suffixes);
+    });
     cancelAdd();
   }
 
@@ -378,11 +392,13 @@ export default function Sidebar() {
     if (!trimName) { setEditingWorker(null); return; }
     const w = store.getWorkerById(id);
     if (!w) { setEditingWorker(null); return; }
-    if (w.name !== trimName) store.setWorkerName(id, trimName);
-    if (w.loginId !== loginId.trim()) store.setWorkerLoginId(id, loginId.trim());
-    const newRoutes = routes.split(',').map((s) => s.trim()).filter(Boolean);
-    if (w.assignedRoutes.join(',') !== newRoutes.join(',')) store.updateWorkerRoutes(id, newRoutes);
-    if ((w.rotations ?? []).join(',') !== rotations.join(',')) store.setWorkerRotations(id, rotations);
+    withCampPermission(() => {
+      if (w.name !== trimName) store.setWorkerName(id, trimName);
+      if (w.loginId !== loginId.trim()) store.setWorkerLoginId(id, loginId.trim());
+      const newRoutes = routes.split(',').map((s) => s.trim()).filter(Boolean);
+      if (w.assignedRoutes.join(',') !== newRoutes.join(',')) store.updateWorkerRoutes(id, newRoutes);
+      if ((w.rotations ?? []).join(',') !== rotations.join(',')) store.setWorkerRotations(id, rotations);
+    });
     setEditingWorker(null);
   }
 
@@ -401,8 +417,10 @@ export default function Sidebar() {
 
   function commitEditSubRoutes() {
     if (!editingSubRoutes) return;
-    const subRoutes = editingSubRoutes.value.split(',').map((s) => s.trim()).filter(Boolean);
-    store.updateRouteSubRoutes(selectedCampId, editingSubRoutes.routeId, subRoutes);
+    withCampPermission(() => {
+      const subRoutes = editingSubRoutes.value.split(',').map((s) => s.trim()).filter(Boolean);
+      store.updateRouteSubRoutes(selectedCampId, editingSubRoutes.routeId, subRoutes);
+    });
     setEditingSubRoutes(null);
   }
 
@@ -489,7 +507,13 @@ export default function Sidebar() {
                       className="camp-save-btn"
                       onClick={() => {
                         const name = editingCamp.name.trim();
-                        if (name) store.renameCamp(camp.id, name, editingCamp.wave);
+                        if (name) {
+                          if (!auth.canEditCamp(camp.id)) {
+                            alert('이 캠프에 대한 편집 권한이 없습니다.');
+                          } else {
+                            store.renameCamp(camp.id, name, editingCamp.wave);
+                          }
+                        }
                         setEditingCamp(null);
                       }}
                     >
@@ -722,7 +746,7 @@ export default function Sidebar() {
                   <span className="worker-routes" title={w.assignedRoutes.join(', ')}>
                     {w.assignedRoutes.length > 0 ? w.assignedRoutes.join(', ') : '-'}
                   </span>
-                  {<button className="remove-btn" onClick={() => store.removeWorker(w.id)} title="삭제">&times;</button>}
+                  {<button className="remove-btn" onClick={() => withCampPermission(() => store.removeWorker(w.id))} title="삭제">&times;</button>}
                 </>
               )}
             </li>
@@ -849,7 +873,7 @@ export default function Sidebar() {
                   <span className="worker-routes" title={w.assignedRoutes.join(', ')}>
                     {w.assignedRoutes.length > 0 ? w.assignedRoutes.join(', ') : '-'}
                   </span>
-                  {<button className="remove-btn" onClick={() => store.removeWorker(w.id)} title="삭제">&times;</button>}
+                  {<button className="remove-btn" onClick={() => withCampPermission(() => store.removeWorker(w.id))} title="삭제">&times;</button>}
                 </>
               )}
             </li>
@@ -929,7 +953,7 @@ export default function Sidebar() {
                   {r.subRoutes.join(', ')}
                 </span>
               )}
-              {<button className="remove-btn" onClick={() => store.removeRoute(selectedCampId, r.id)} title="삭제">&times;</button>}
+              {<button className="remove-btn" onClick={() => withCampPermission(() => store.removeRoute(selectedCampId, r.id))} title="삭제">&times;</button>}
             </li>
           ))}
         </ul>
