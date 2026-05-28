@@ -45,15 +45,16 @@ export const ROTATIONS_BY_WAVE: Record<string, string[]> = {
   WAVE2: ['1회전', '2회전'],         // 주간
 };
 
-/** 기사 정보 */
+/** 기사 정보 (v1.1: 주간 roster에 소속) */
 export interface Worker {
   id: string;
+  weeklyRosterId: string;   // v1.1: 어느 주차 roster 멤버인지
   name: string;
   loginId: string;
-  campId: string;
+  campId: string;           // 보존 (legacy + RLS 호환 — weeklyRoster.campId 와 항상 동일)
   role: WorkerRole;
   assignedRoutes: SubRoute[];
-  rotations: string[];    // 담당 회전 목록 (기본: wave 전체)
+  rotations: string[];      // 담당 회전 목록 (기본: wave 전체)
   phone?: string;
   vehicle?: string;
   note?: string;
@@ -93,12 +94,24 @@ export interface CampPermission {
   canEdit: boolean;
 }
 
-/** 캠프 잠금 정보 */
+/** 캠프 잠금 정보 (v1.1: 주차 단위로 분리) */
 export interface CampLock {
   campId: string;
+  weekStart: string;     // 'YYYY-MM-DD' (일요일)
   lockedBy: string;
   lockedAt: string;
   heartbeat: string;
   sessionId: string;
   displayName?: string;  // UI 표시용
+}
+
+/** 주간 roster — 캠프 × 주차 컨테이너 (v1.1 핵심) */
+export interface WeeklyRoster {
+  id: string;
+  campId: string;
+  weekStart: string;     // 'YYYY-MM-DD' (일요일)
+  createdBy?: string;
+  createdAt?: string;
+  /** 'fresh' | 'excel' | 'copied_from:<sourceRosterId>' */
+  source: string;
 }

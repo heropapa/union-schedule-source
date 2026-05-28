@@ -116,12 +116,17 @@ export default function ScheduleCalendar() {
       if (!campId) return;
       const ws = useWorkerStore.getState();
       const ss = useScheduleStore.getState();
+      const roster = ws.currentRoster;
+      if (!roster) {
+        alert('이번 주차 roster가 없습니다. 먼저 인원을 추가해 roster를 만들어주세요.');
+        return;
+      }
       const workers = ws.workers.filter(w => w.campId === campId);
       const routes = ws.routes[campId] ?? [];
       const cells = Object.values(ss.cells).filter(c => workers.some(w => w.id === c.workerId));
 
       await Promise.all(workers.map((w, i) => db.upsertWorker(w, i)));
-      await Promise.all(routes.map((r, i) => db.upsertRoute(campId, r, i)));
+      await Promise.all(routes.map((r, i) => db.upsertRoute(roster.id, campId, r, i)));
       if (cells.length) await db.upsertCellsBatch(cells, campId);
 
       setToast('저장 완료 ✓');
@@ -208,7 +213,9 @@ export default function ScheduleCalendar() {
   }, [store.selectedCampId, workerStore]);
 
   // ── 캠프 잠금 lifecycle (acquire → heartbeat → release) ──
+  // v1.1: 잠금 단위는 (campId, weekStart). 주차가 바뀌면 잠금도 재취득.
   // DB 측 stale 타임아웃 45s, 우리는 20s 간격 heartbeat
+  const weekStartStr = format(store.weekStart, 'yyyy-MM-dd');
   useEffect(() => {
     const campId = store.selectedCampId;
     if (!campId) {
@@ -230,23 +237,23 @@ export default function ScheduleCalendar() {
 
     const release = () => {
       // fire-and-forget — 페이지 종료/캠프 전환 시 마지막 정리
-      db.releaseLock(campId).catch(() => {});
+      db.releaseLock(campId, weekStartStr).catch(() => {});
     };
 
     const tryAcquire = async () => {
       setLockStatus('acquiring');
       setBlockedBy(null);
       try {
-        const result = await db.acquireLock(campId, sessionId);
+        const result = await db.acquireLock(campId, weekStartStr, sessionId);
         if (cancelled) {
-          // 획득 도중 캠프가 바뀜 — 받은 잠금 즉시 해제
-          if (result.success) db.releaseLock(campId).catch(() => {});
+          // 획득 도중 캠프/주차가 바뀜 — 받은 잠금 즉시 해제
+          if (result.success) db.releaseLock(campId, weekStartStr).catch(() => {});
           return;
         }
         if (result.success) {
           setLockStatus('held');
           heartbeatTimer = setInterval(() => {
-            db.heartbeatLock(campId).catch(() => {});
+            db.heartbeatLock(campId, weekStartStr).catch(() => {});
           }, 20000);
         } else {
           setLockStatus('blocked');
@@ -266,9 +273,7 @@ export default function ScheduleCalendar() {
       window.removeEventListener('beforeunload', release);
       release();
     };
-    // hasCampPermission만 트래킹 — auth 전체를 dep에 두면 무관한 상태
-    // (loading/error 등) 변화에도 lock을 재취득하게 된다.
-  }, [store.selectedCampId, hasCampPermission]);
+  }, [store.selectedCampId, weekStartStr, hasCampPermission]);
 
   // blocked 상태에서 30초마다 잠금 재시도 (상대방이 종료했을 수 있음)
   useEffect(() => {
@@ -276,7 +281,7 @@ export default function ScheduleCalendar() {
     const campId = store.selectedCampId;
     if (!campId) return;
     const retry = setInterval(async () => {
-      const result = await db.acquireLock(campId, sessionIdRef.current);
+      const result = await db.acquireLock(campId, weekStartStr, sessionIdRef.current);
       if (result.success) {
         setLockStatus('held');
         setBlockedBy(null);
@@ -285,7 +290,7 @@ export default function ScheduleCalendar() {
       }
     }, 30000);
     return () => clearInterval(retry);
-  }, [lockStatus, store.selectedCampId]);
+  }, [lockStatus, store.selectedCampId, weekStartStr]);
 
   // 로컬 순서 적용
   const orderedRegulars = useMemo(() => applyOrder(regulars, regularOrder), [regulars, regularOrder]);

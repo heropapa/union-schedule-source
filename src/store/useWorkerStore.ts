@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Worker, WorkerRole, Route, Camp } from '../types';
+import type { Worker, WorkerRole, Route, Camp, WeeklyRoster } from '../types';
 import { ROTATIONS_BY_WAVE } from '../types';
 import { pushHistory } from './historyBridge';
 import * as db from '../lib/db';
@@ -14,18 +14,39 @@ interface OrderMap {
 type OrderSection = 'sidebar' | 'table';
 type OrderType = 'regular' | 'backup';
 
+/**
+ * v1.1: 단일 (campId, weekStart) 컨텍스트를 보유.
+ * 캠프나 주차가 바뀌면 loadCampWeek가 호출되어 전체를 새로 로드.
+ *
+ * 콜사이트가 호환되도록 routes/orders 는 여전히 campId-keyed Record 모양을
+ * 유지하지만 사실상 currentCampId 키 하나만 채워짐.
+ */
 interface WorkerState {
-  workers: Worker[];
-  routes: Record<string, Route[]>;
-  orders: Record<string, OrderMap>;
   camps: Camp[];
-  loadedCamps: Set<string>;  // 어떤 캠프가 이미 로드됐는지 추적
 
-  // DB 로드
+  // 활성 컨텍스트
+  currentCampId: string;
+  currentWeekStart: string;       // 'YYYY-MM-DD'
+  currentRoster: WeeklyRoster | null;
+
+  workers: Worker[];                          // currentRoster의 인원
+  routes: Record<string, Route[]>;            // campId → Route[] (currentCampId만 채워짐)
+  orders: Record<string, OrderMap>;           // 동일
+
+  loading: boolean;
+
+  // ─── 로드 ────────────────────────────────────
   loadCamps: () => Promise<void>;
-  loadCamp: (campId: string) => Promise<void>;
+  /** (campId, weekStart) 컨텍스트로 전환 — roster 있으면 채우고, 없으면 빈 상태 */
+  loadCampWeek: (campId: string, weekStart: string) => Promise<void>;
 
-  // 조회
+  // ─── Roster 관리 ─────────────────────────────
+  /** 현재 (camp, week)에 빈 roster 생성 */
+  createRosterFresh: () => Promise<void>;
+  /** 다른 roster를 복사해서 현재 (camp, week) roster 생성 (인원/라우트만, 셀은 복제 안 함) */
+  copyRosterFrom: (sourceRosterId: string) => Promise<void>;
+
+  // ─── 조회 ────────────────────────────────────
   getWorkersByCamp: (campId: string) => Worker[];
   getRegularWorkers: (campId: string) => Worker[];
   getBackupWorkers: (campId: string) => Worker[];
@@ -34,25 +55,23 @@ interface WorkerState {
   getOrder: (campId: string, section: OrderSection, type: OrderType) => string[];
   setOrder: (campId: string, section: OrderSection, type: OrderType, ids: string[]) => void;
 
-  // 캠프 CRUD
+  // ─── 캠프 CRUD ───────────────────────────────
   addCamp: (name: string, wave?: string, companyId?: string) => void;
   removeCamp: (campId: string) => void;
   renameCamp: (campId: string, name: string, wave?: string) => void;
   reorderCamps: (fromId: string, toId: string) => void;
 
-  // 인원 CRUD
+  // ─── 인원 CRUD (currentRoster 자동 생성) ────
   addWorker: (name: string, campId: string, role: WorkerRole, loginId?: string) => void;
   removeWorker: (workerId: string) => void;
   updateWorkerRoutes: (workerId: string, routes: string[]) => void;
-
-  // 인원 편집
   setWorkerName: (workerId: string, name: string) => void;
   setWorkerLoginId: (workerId: string, loginId: string) => void;
   setWorkerRotations: (workerId: string, rotations: string[]) => void;
   moveWorker: (workerId: string, direction: 'up' | 'down') => void;
   sortWorkers: (campId: string, by: 'name' | 'routes', dir: 'asc' | 'desc') => void;
 
-  // 라우트 CRUD
+  // ─── 라우트 CRUD ─────────────────────────────
   addRoute: (campId: string, routeId: string, suffixes?: string[]) => void;
   removeRoute: (campId: string, routeId: string) => void;
   moveRoute: (campId: string, routeId: string, direction: 'up' | 'down') => void;
@@ -71,57 +90,136 @@ const orderKey = (section: OrderSection, type: OrderType): keyof OrderMap =>
 
 const CAMP_COLORS = ['#3174ad', '#e67c73', '#33b679', '#f6bf26', '#8e24aa', '#e67c73', '#039be5', '#616161'];
 
-/** DB에 worker를 저장 (fire-and-forget) */
 function saveWorkerToDB(worker: Worker, sortOrder: number) {
   db.upsertWorker(worker, sortOrder).catch(e => console.error('DB worker save failed:', e));
 }
 
-/** 캠프 내 모든 workers의 sort_order를 DB에 반영 */
-function syncWorkerOrders(workers: Worker[], campId: string) {
-  const campWorkers = workers.filter(w => w.campId === campId);
-  campWorkers.forEach((w, i) => {
+function syncWorkerOrdersToDB(workers: Worker[]) {
+  workers.forEach((w, i) => {
     db.upsertWorker(w, i).catch(e => console.error('DB worker order sync failed:', e));
   });
 }
 
 export const useWorkerStore = create<WorkerState>()((set, get) => ({
+  camps: [],
+  currentCampId: '',
+  currentWeekStart: '',
+  currentRoster: null,
   workers: [],
   routes: {},
   orders: {},
-  camps: [],
-  loadedCamps: new Set(),
+  loading: false,
 
-  // ─── DB 로드 ─────────────────────────────────
+  // ─── 로드 ────────────────────────────────────
 
   loadCamps: async () => {
     const camps = await db.fetchCamps();
     set({ camps });
   },
 
-  loadCamp: async (campId) => {
-    if (get().loadedCamps.has(campId)) return;
-    const [workers, routes, orders] = await Promise.all([
-      db.fetchWorkersByCamp(campId),
-      db.fetchRoutesByCamp(campId),
-      db.fetchWorkerOrders(campId),
+  loadCampWeek: async (campId, weekStart) => {
+    set({
+      loading: true,
+      currentCampId: campId,
+      currentWeekStart: weekStart,
+    });
+
+    try {
+      const roster = await db.fetchRoster(campId, weekStart);
+
+      if (!roster) {
+        // roster 없음 — 빈 컨텍스트
+        set({
+          currentRoster: null,
+          workers: [],
+          routes: { [campId]: [] },
+          orders: { [campId]: { ...emptyOrderMap } },
+          loading: false,
+        });
+        return;
+      }
+
+      const [workers, routes, ordersRaw] = await Promise.all([
+        db.fetchWorkersByRoster(roster.id),
+        db.fetchRoutesByRoster(roster.id),
+        db.fetchWorkerOrders(campId, weekStart),
+      ]);
+
+      const orderMap: OrderMap = {
+        sidebarRegular: ordersRaw.sidebar?.regular ?? [],
+        sidebarBackup: ordersRaw.sidebar?.backup ?? [],
+        tableRegular: ordersRaw.table?.regular ?? [],
+        tableBackup: ordersRaw.table?.backup ?? [],
+      };
+
+      set({
+        currentRoster: roster,
+        workers,
+        routes: { [campId]: routes },
+        orders: { [campId]: orderMap },
+        loading: false,
+      });
+    } catch (e) {
+      console.error('loadCampWeek failed:', e);
+      set({ loading: false });
+    }
+  },
+
+  // ─── Roster 관리 ─────────────────────────────
+
+  createRosterFresh: async () => {
+    const { currentCampId, currentWeekStart } = get();
+    if (!currentCampId || !currentWeekStart) return;
+    const roster = await db.createRoster({
+      campId: currentCampId,
+      weekStart: currentWeekStart,
+      source: 'fresh',
+    });
+    set({
+      currentRoster: roster,
+      workers: [],
+      routes: { [currentCampId]: [] },
+      orders: { [currentCampId]: { ...emptyOrderMap } },
+    });
+  },
+
+  copyRosterFrom: async (sourceRosterId) => {
+    const { currentCampId, currentWeekStart } = get();
+    if (!currentCampId || !currentWeekStart) return;
+
+    // 1) source roster 의 workers/routes 가져오기
+    const [srcWorkers, srcRoutes] = await Promise.all([
+      db.fetchWorkersByRoster(sourceRosterId),
+      db.fetchRoutesByRoster(sourceRosterId),
     ]);
 
-    const orderMap: OrderMap = {
-      sidebarRegular: orders.sidebar?.regular ?? [],
-      sidebarBackup: orders.sidebar?.backup ?? [],
-      tableRegular: orders.table?.regular ?? [],
-      tableBackup: orders.table?.backup ?? [],
-    };
+    // 2) 새 roster 생성
+    const newRoster = await db.createRoster({
+      campId: currentCampId,
+      weekStart: currentWeekStart,
+      source: `copied_from:${sourceRosterId}`,
+    });
 
-    set((state) => ({
-      workers: [
-        ...state.workers.filter(w => w.campId !== campId),
-        ...workers,
-      ],
-      routes: { ...state.routes, [campId]: routes },
-      orders: { ...state.orders, [campId]: orderMap },
-      loadedCamps: new Set([...state.loadedCamps, campId]),
+    // 3) workers 복사 (새 id 부여, 새 roster에 attach)
+    const copiedWorkers: Worker[] = srcWorkers.map((w) => ({
+      ...w,
+      id: `w_${++idCounter}`,
+      weeklyRosterId: newRoster.id,
+      campId: currentCampId,
     }));
+    await Promise.all(copiedWorkers.map((w, i) => db.upsertWorker(w, i)));
+
+    // 4) routes 복사
+    await Promise.all(srcRoutes.map((r, i) =>
+      db.upsertRoute(newRoster.id, currentCampId, r, i),
+    ));
+
+    set({
+      currentRoster: newRoster,
+      workers: copiedWorkers,
+      routes: { [currentCampId]: srcRoutes },
+      orders: { [currentCampId]: { ...emptyOrderMap } },
+    });
   },
 
   // ─── 조회 ────────────────────────────────────
@@ -155,7 +253,11 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
       };
     });
     // DB 저장
-    db.updateWorkerOrders(campId, section, type, ids).catch(e => console.error('DB order save failed:', e));
+    const { currentWeekStart } = get();
+    if (currentWeekStart) {
+      db.updateWorkerOrders(campId, currentWeekStart, section, type, ids)
+        .catch(e => console.error('DB order save failed:', e));
+    }
   },
 
   // ─── 캠프 CRUD ───────────────────────────────
@@ -166,7 +268,6 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
     const colorIdx = get().camps.length % CAMP_COLORS.length;
     const newCamp: Camp = { id, name, wave: wave ?? 'WAVE1', color: CAMP_COLORS[colorIdx], companyId: companyId ?? 'union' };
     set((state) => ({ camps: [...state.camps, newCamp] }));
-    // DB
     db.upsertCamp(newCamp, get().camps.length - 1).catch(e => console.error('DB camp add failed:', e));
   },
 
@@ -195,7 +296,6 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
       camps.splice(toIdx, 0, moved);
       return { camps };
     });
-    // DB: 전체 순서 업데이트
     get().camps.forEach((c, i) => {
       db.upsertCamp(c, i).catch(e => console.error('DB camp reorder failed:', e));
     });
@@ -221,16 +321,44 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
 
   addWorker: (name, campId, role, loginId) => {
     pushHistory();
-    const id = `w_${++idCounter}`;
-    const camp = get().camps.find((c) => c.id === campId);
-    const defaultRotations = ROTATIONS_BY_WAVE[camp?.wave ?? 'WAVE1'] ?? [];
-    const newWorker: Worker = {
-      id, name, loginId: loginId || '', campId, role,
-      assignedRoutes: [], rotations: [...defaultRotations],
+    const { currentCampId, currentWeekStart, currentRoster } = get();
+
+    // 다른 캠프/주차 추가 요청은 무시 (단일 컨텍스트 보장)
+    if (campId !== currentCampId) {
+      console.warn('addWorker: campId mismatch', { campId, currentCampId });
+      return;
+    }
+
+    const doAdd = (rosterId: string) => {
+      const id = `w_${++idCounter}`;
+      const camp = get().camps.find((c) => c.id === campId);
+      const defaultRotations = ROTATIONS_BY_WAVE[camp?.wave ?? 'WAVE1'] ?? [];
+      const newWorker: Worker = {
+        id,
+        weeklyRosterId: rosterId,
+        name,
+        loginId: loginId || '',
+        campId,
+        role,
+        assignedRoutes: [],
+        rotations: [...defaultRotations],
+      };
+      set((state) => ({ workers: [...state.workers, newWorker] }));
+      const sortOrder = get().workers.filter(w => w.campId === campId).length - 1;
+      saveWorkerToDB(newWorker, sortOrder);
     };
-    set((state) => ({ workers: [...state.workers, newWorker] }));
-    const sortOrder = get().workers.filter(w => w.campId === campId).length - 1;
-    saveWorkerToDB(newWorker, sortOrder);
+
+    if (currentRoster) {
+      doAdd(currentRoster.id);
+    } else {
+      // roster 없으면 자동 생성 (fresh)
+      db.createRoster({ campId, weekStart: currentWeekStart, source: 'fresh' })
+        .then((roster) => {
+          set({ currentRoster: roster });
+          doAdd(roster.id);
+        })
+        .catch(e => console.error('auto-create roster failed:', e));
+    }
   },
 
   removeWorker: (workerId) => {
@@ -321,8 +449,7 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
       }
       return state;
     });
-    const w = get().workers.find(w => w.id === workerId);
-    if (w) syncWorkerOrders(get().workers, w.campId);
+    syncWorkerOrdersToDB(get().workers);
   },
 
   sortWorkers: (campId, by, dir) => {
@@ -349,27 +476,51 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
       sortGroup('backup');
       return { workers };
     });
-    syncWorkerOrders(get().workers, campId);
+    syncWorkerOrdersToDB(get().workers);
   },
 
   // ─── 라우트 CRUD ─────────────────────────────
 
   addRoute: (campId, routeId, suffixes) => {
     pushHistory();
+    const { currentCampId, currentWeekStart, currentRoster } = get();
+    if (campId !== currentCampId) {
+      console.warn('addRoute: campId mismatch', { campId, currentCampId });
+      return;
+    }
+
     const subs = (suffixes || ['A', 'B', 'C', 'D']).map((s) => `${routeId}${s}`);
     const newRoute: Route = { id: routeId, subRoutes: subs };
-    set((state) => {
-      const campRoutes = state.routes[campId] ?? [];
-      return {
-        routes: { ...state.routes, [campId]: [...campRoutes, newRoute] },
-      };
-    });
-    const sortOrder = (get().routes[campId] ?? []).length - 1;
-    db.upsertRoute(campId, newRoute, sortOrder).catch(e => console.error('DB route add failed:', e));
+
+    const doAdd = (rosterId: string) => {
+      set((state) => {
+        const campRoutes = state.routes[campId] ?? [];
+        return {
+          routes: { ...state.routes, [campId]: [...campRoutes, newRoute] },
+        };
+      });
+      const sortOrder = (get().routes[campId] ?? []).length - 1;
+      db.upsertRoute(rosterId, campId, newRoute, sortOrder)
+        .catch(e => console.error('DB route add failed:', e));
+    };
+
+    if (currentRoster) {
+      doAdd(currentRoster.id);
+    } else {
+      db.createRoster({ campId, weekStart: currentWeekStart, source: 'fresh' })
+        .then((roster) => {
+          set({ currentRoster: roster });
+          doAdd(roster.id);
+        })
+        .catch(e => console.error('auto-create roster failed:', e));
+    }
   },
 
   moveRoute: (campId, routeId, direction) => {
     pushHistory();
+    const { currentRoster } = get();
+    if (!currentRoster) return;
+
     set((state) => {
       const campRoutes = [...(state.routes[campId] ?? [])];
       const idx = campRoutes.findIndex((r) => r.id === routeId);
@@ -379,14 +530,17 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
       [campRoutes[idx], campRoutes[swapIdx]] = [campRoutes[swapIdx], campRoutes[idx]];
       return { routes: { ...state.routes, [campId]: campRoutes } };
     });
-    // DB: 순서 업데이트
     (get().routes[campId] ?? []).forEach((r, i) => {
-      db.upsertRoute(campId, r, i).catch(e => console.error('DB route reorder failed:', e));
+      db.upsertRoute(currentRoster.id, campId, r, i)
+        .catch(e => console.error('DB route reorder failed:', e));
     });
   },
 
   updateRouteSubRoutes: (campId, routeId, subRoutes) => {
     pushHistory();
+    const { currentRoster } = get();
+    if (!currentRoster) return;
+
     set((state) => ({
       routes: {
         ...state.routes,
@@ -398,12 +552,16 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
     const route = (get().routes[campId] ?? []).find(r => r.id === routeId);
     if (route) {
       const idx = (get().routes[campId] ?? []).indexOf(route);
-      db.upsertRoute(campId, route, idx).catch(e => console.error('DB route update failed:', e));
+      db.upsertRoute(currentRoster.id, campId, route, idx)
+        .catch(e => console.error('DB route update failed:', e));
     }
   },
 
   removeRoute: (campId, routeId) => {
     pushHistory();
+    const { currentRoster } = get();
+    if (!currentRoster) return;
+
     set((state) => {
       const campRoutes = (state.routes[campId] ?? []).filter((r) => r.id !== routeId);
       const removedSubs = new Set(
@@ -422,7 +580,8 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
         workers,
       };
     });
-    db.deleteRoute(campId, routeId).catch(e => console.error('DB route delete failed:', e));
+    db.deleteRoute(currentRoster.id, routeId)
+      .catch(e => console.error('DB route delete failed:', e));
     // worker assignedRoutes 변경도 DB에 반영
     const campWorkers = get().workers.filter(w => w.campId === campId);
     campWorkers.forEach((w, i) => saveWorkerToDB(w, i));

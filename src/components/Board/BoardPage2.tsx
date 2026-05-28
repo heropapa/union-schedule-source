@@ -8,7 +8,7 @@ import './BoardPage2.css';
 
 type CampRow = { id: string; name: string; wave: string; color: string; company_id: string };
 type WorkerRow = {
-  id: string; name: string; login_id: string; camp_id: string;
+  id: string; weekly_roster_id: string; name: string; login_id: string; camp_id: string;
   role: WorkerRole; assigned_routes: string[] | null; rotations: string[] | null;
 };
 type RouteRow = { route_id: string; sub_routes: string[] | null };
@@ -138,7 +138,8 @@ export default function BoardPage2() {
           ]);
 
           const workers: Worker[] = (wRes.data ?? []).map((r: WorkerRow) => ({
-            id: r.id, name: r.name, loginId: r.login_id, campId: r.camp_id,
+            id: r.id, weeklyRosterId: r.weekly_roster_id,
+            name: r.name, loginId: r.login_id, campId: r.camp_id,
             role: r.role, assignedRoutes: r.assigned_routes ?? [], rotations: r.rotations ?? [],
           }));
           allWorkers.push(...workers);

@@ -93,14 +93,14 @@ export default function Sidebar() {
   const { selectedCampId, setcamp, loadCells } = useScheduleStore();
   const store = useWorkerStore();
 
-  // 캠프 선택 시 DB에서 데이터 로드
+  // 캠프 선택 — setcamp가 내부적으로 loadCampWeek 트리거.
+  // 셀은 따로 로드 (스케쥴 셀 = workers 와 다른 테이블).
   const selectCamp = async (campId: string) => {
     setcamp(campId);
     try {
-      await store.loadCamp(campId);
       await loadCells(campId);
     } catch (err) {
-      console.error('캠프 데이터 로드 실패:', err);
+      console.error('셀 데이터 로드 실패:', err);
     }
   };
 

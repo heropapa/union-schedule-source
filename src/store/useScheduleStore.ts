@@ -57,6 +57,14 @@ interface ScheduleState {
 
 const initialWeekStart = getWeekStart(new Date());
 
+/** 주차 변경 시 워커 스토어를 (current camp, 새 주차) 로 재로드 */
+function reloadWorkersForCurrent(newWeekStart: Date) {
+  const ss = useScheduleStore.getState();
+  if (!ss.selectedCampId) return;
+  useWorkerStore.getState().loadCampWeek(ss.selectedCampId, format(newWeekStart, 'yyyy-MM-dd'))
+    .catch(e => console.error('loadCampWeek on week change failed:', e));
+}
+
 export const useScheduleStore = create<ScheduleState>()((set, get) => ({
   cells: {},
   selectedCampId: '',
@@ -70,26 +78,36 @@ export const useScheduleStore = create<ScheduleState>()((set, get) => ({
     }));
   },
 
-  setcamp: (campId) => set({ selectedCampId: campId }),
+  setcamp: (campId) => {
+    set({ selectedCampId: campId });
+    // 캠프 전환 시 워커 스토어도 (campId, currentWeekStart) 컨텍스트로 동기화
+    const ws = get().weekStart;
+    useWorkerStore.getState().loadCampWeek(campId, format(ws, 'yyyy-MM-dd'))
+      .catch(e => console.error('loadCampWeek on setcamp failed:', e));
+  },
 
   setWeek: (date) => {
     const ws = getWeekStart(date);
     set({ weekStart: ws, weekDates: getWeekDates(ws) });
+    reloadWorkersForCurrent(ws);
   },
 
   prevWeek: () => {
     const ws = addDays(get().weekStart, -7);
     set({ weekStart: ws, weekDates: getWeekDates(ws) });
+    reloadWorkersForCurrent(ws);
   },
 
   nextWeek: () => {
     const ws = addDays(get().weekStart, 7);
     set({ weekStart: ws, weekDates: getWeekDates(ws) });
+    reloadWorkersForCurrent(ws);
   },
 
   goToday: () => {
     const ws = getWeekStart(new Date());
     set({ weekStart: ws, weekDates: getWeekDates(ws) });
+    reloadWorkersForCurrent(ws);
   },
 
   setCell: (workerId, date, status, cellRoutes) => {
