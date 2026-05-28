@@ -93,24 +93,17 @@ supabase/
 | `b26e970` | **fix(lint)**: `any` 9건 → 구체 row 타입(`CampRow`/`WorkerRow`/...) + regex useless escape |
 | `2bb9a92` | **fix(react)**: Sidebar.useDragReorder ref-during-render → useEffect. ScheduleCalendar handleRowDrop useCallback wrap + workerStore deps |
 | `145359a` | **fix(auth)**: Issue #4 권한 게이팅 wire-up. canEdit = lock∧권한, lock acquire 자체에 권한 게이트, Sidebar mutation들에 `withCampPermission()` |
+| `bb92616` | **fix(react, perf)**: Issue #4 잔여 gaps + Issue #5 closeout. drop/autoFill 게이트, lock effect dep 좁힘, Sidebar 6 deps warning 0건, supabase/db static 통일, vite manualChunks + xlsx lazy. 첫 화면 768→478 KB. |
 
 ## Supabase 측 조치 (배포 전 필수)
 
 - SQL Editor → `supabase/rls-public-board.sql` 전체 실행 (게시판 RLS)
 - Authentication → Users → `atone@schedule.local` 삭제 권장 (anon key 전환으로 더 이상 필요 없음)
 
-## 알려진 잔여 cleanup (위험도 낮음, 일괄 처리 가능)
+## 알려진 잔여 cleanup
 
-### React deps warnings (Sidebar.tsx 6건)
-deps 누락이지만 무차별 추가하면 useEffect 재실행 빈도가 의도와 달라질 수 있어 보수적으로 남김:
-- `regulars`/`backups` conditional → useMemo wrap 필요 (L182, L183)
-- editingCamp / editingWorker / editingSubRoutes / store deps (L196, L212, L339, L346)
-
-각각 effect 의도를 한 번씩 확인하고 deps 추가 vs `// eslint-disable-next-line react-hooks/exhaustive-deps` 결정 필요.
-
-### 빌드 경고
-- `supabase.ts` / `db.ts`가 dynamic+static 동시 import → chunk 분할 안 됨
-- bundle 768KB → 500KB 임계 초과. manualChunks 또는 라우트 단위 lazy load 검토
+(2026-05-28 `bb92616` 에서 일괄 해소 — Sidebar deps 6건, supabase/db mixed import,
+manualChunks, xlsx lazy. 현재 typecheck/lint/build 경고 0건.)
 
 ## 다음 단계: v1.1 (대대적 기능 추가)
 
