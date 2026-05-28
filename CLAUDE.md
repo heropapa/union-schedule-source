@@ -94,6 +94,9 @@ supabase/
 | `2bb9a92` | **fix(react)**: Sidebar.useDragReorder ref-during-render → useEffect. ScheduleCalendar handleRowDrop useCallback wrap + workerStore deps |
 | `145359a` | **fix(auth)**: Issue #4 권한 게이팅 wire-up. canEdit = lock∧권한, lock acquire 자체에 권한 게이트, Sidebar mutation들에 `withCampPermission()` |
 | `bb92616` | **fix(react, perf)**: Issue #4 잔여 gaps + Issue #5 closeout. drop/autoFill 게이트, lock effect dep 좁힘, Sidebar 6 deps warning 0건, supabase/db static 통일, vite manualChunks + xlsx lazy. 첫 화면 768→478 KB. |
+| `05f2937` | **fix(ui)**: "고정 기사" → "고정 인원" rename (UI 라벨/툴팁/주석 6군데) |
+| `0096d4e` | **feat(db)**: v1.1 Weekly Roster 마이그레이션 SQL. Clean start — v1.0 영구 데이터 비우고 weekly_rosters 테이블 + workers/routes/locks/orders 에 주차 컬럼 추가. 99줄 단일 트랜잭션. **이미 Supabase에 적용됨**. |
+| `7eb9268` | **feat(v1.1)**: types/db/stores 를 weekly_roster 모델로 정렬 (C1~C4). loadCampWeek, createRosterFresh, copyRosterFrom 추가. 자동 캠프×주차 동기화. |
 
 ## Supabase 측 조치 (배포 전 필수)
 
@@ -105,14 +108,21 @@ supabase/
 (2026-05-28 `bb92616` 에서 일괄 해소 — Sidebar deps 6건, supabase/db mixed import,
 manualChunks, xlsx lazy. 현재 typecheck/lint/build 경고 0건.)
 
-## 다음 단계: v1.1 (대대적 기능 추가)
+## v1.1 진행 상황 (Weekly Roster)
 
-v1.0은 baseline cleanup 완료. v1.1 스펙은 사용자와 별도 논의 후 결정.
+v1.0 → v1.1 전환 중. **핵심 변화**: 캠프 = 영구 인원/라우트 → 캠프 × 주차 = 별도 roster.
 
-논의 시작점 (memory `project_schedule_redesign.md` 기준):
-- 게시 기능 확장 (현재: 캠프 단위 published 토글 / 다음: 주간/일간 단위?)
-- 캠프 잠금 정책 (현재: 단일 사용자 / 다음: read-only viewer 다중 접속?)
-- 캠프 메타 관리 분리 (현재: Sidebar 인라인 / 다음: 별도 admin 화면?)
+진행:
+- ✅ DB 마이그레이션 (`0096d4e` SQL, Supabase 적용 완료)
+- ✅ 코드 계층 정렬 (`7eb9268`, C1~C4): types/db/stores
+- ⏳ C5: 빈 roster 상태 entry UI (빈 캠프 들어가면 "엑셀 업로드 / 이전 주 불러오기 / 처음부터" 선택)
+- ⏳ C6: "이전 주 불러오기" 모달 (listRostersByCamp 결과 → copyRosterFrom)
+- ⏳ C7: 엑셀 업로드/다운로드 (시트 3개: 고정인원/백업인원/계약라우트)
+
+남은 v1.0 시절 논의 (v1.2+ 후보):
+- 게시 기능 확장 (캠프 단위 → 주간/일간 단위?)
+- 캠프 잠금 정책 (단일 사용자 → read-only viewer 다중 접속?)
+- 캠프 메타 관리 분리 (Sidebar 인라인 → 별도 admin 화면?)
 - 모바일 뷰
 - 알림/공지사항
 
