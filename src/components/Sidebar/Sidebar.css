@@ -933,3 +933,107 @@
   background: #ccc;
   cursor: not-allowed;
 }
+
+/* ── roster 백업/복구 + 다른 주 불러오기 ── */
+.roster-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.roster-tool-btn {
+  flex: 1 1 auto;
+  padding: 6px 8px;
+  font-size: 12px;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  background: #f7f7f7;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.roster-tool-btn:hover:not(:disabled) {
+  background: #ececec;
+}
+.roster-tool-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.roster-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.roster-modal {
+  background: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  width: min(420px, 90vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+.roster-modal h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.roster-modal p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #555;
+}
+.roster-preview-list {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.roster-preview-camps {
+  margin-bottom: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  padding: 6px;
+}
+.roster-preview-camp {
+  font-size: 12px;
+  padding: 3px 0;
+  border-bottom: 1px solid #f3f3f3;
+}
+.roster-week-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.roster-week-list li {
+  margin-bottom: 6px;
+}
+.roster-week-btn {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fafafa;
+  cursor: pointer;
+  gap: 10px;
+}
+.roster-week-btn:hover:not(:disabled) {
+  background: #eef4fb;
+  border-color: #3174ad;
+}
+.roster-week-date {
+  font-weight: 600;
+  font-size: 13px;
+}
+.roster-week-src {
+  font-size: 11px;
+  color: #888;
+}

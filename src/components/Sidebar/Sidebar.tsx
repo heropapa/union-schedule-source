@@ -2,12 +2,13 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useScheduleStore } from '../../store/useScheduleStore';
 import { useWorkerStore } from '../../store/useWorkerStore';
 import { markDirty } from '../../store/historyBridge';
-import type { Worker, WorkerRole, CampPermission } from '../../types';
+import type { Worker, WorkerRole, CampPermission, WeeklyRoster } from '../../types';
 import { ROTATIONS_BY_WAVE, COMPANIES } from '../../types';
 import { useAuthStore } from '../../store/useAuthStore';
 import * as db from '../../lib/db';
 import type { UserProfile } from '../../lib/db';
 import { supabase } from '../../lib/supabase';
+import { parseRosterExcel, type ParsedRosterCamp } from '../../utils/rosterExcel';
 import './Sidebar.css';
 
 /** ID 배열 재정렬 */
@@ -114,6 +115,94 @@ export default function Sidebar() {
       return;
     }
     action();
+  }
+
+  // ── 엑셀 백업/복구 + 다른 주 불러오기 ──
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [importPreview, setImportPreview] = useState<{
+    parsed: ParsedRosterCamp[];
+    campCount: number;
+    workerCount: number;
+    routeCount: number;
+  } | null>(null);
+
+  // 다른 주 불러오기 모달
+  const [weekLoadOpen, setWeekLoadOpen] = useState(false);
+  const [weekRosters, setWeekRosters] = useState<WeeklyRoster[]>([]);
+
+  async function handleExport() {
+    setBusy(true);
+    try {
+      await store.exportAllCamps();
+    } catch (err) {
+      console.error('엑셀 백업 실패:', err);
+      alert('엑셀 백업에 실패했습니다.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // 같은 파일 재선택 허용
+    if (!file) return;
+    try {
+      const buffer = await file.arrayBuffer();
+      const parsed = await parseRosterExcel(buffer);
+      if (parsed.length === 0) {
+        alert('복구할 캠프 데이터가 없습니다.');
+        return;
+      }
+      const workerCount = parsed.reduce((n, c) => n + c.regulars.length + c.backups.length, 0);
+      const routeCount = parsed.reduce((n, c) => n + c.routes.length, 0);
+      setImportPreview({ parsed, campCount: parsed.length, workerCount, routeCount });
+    } catch (err) {
+      console.error('엑셀 파싱 실패:', err);
+      alert(`엑셀 파일을 읽을 수 없습니다.\n${err instanceof Error ? err.message : ''}`);
+    }
+  }
+
+  async function confirmImport() {
+    if (!importPreview) return;
+    setBusy(true);
+    try {
+      await store.importAllCamps(importPreview.parsed);
+      setImportPreview(null);
+    } catch (err) {
+      console.error('엑셀 복구 실패:', err);
+      alert('엑셀 복구에 실패했습니다.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openWeekLoad() {
+    if (!selectedCampId) return;
+    try {
+      const rosters = await db.listRostersByCamp(selectedCampId);
+      const current = useWorkerStore.getState().currentWeekStart;
+      setWeekRosters(rosters.filter((r) => r.weekStart !== current));
+      setWeekLoadOpen(true);
+    } catch (err) {
+      console.error('roster 목록 로드 실패:', err);
+      alert('주차 목록을 불러올 수 없습니다.');
+    }
+  }
+
+  async function handleLoadWeek(roster: WeeklyRoster) {
+    const hasData = regulars.length > 0 || backups.length > 0 || campRoutes.length > 0;
+    if (hasData && !confirm('현재 주차에 데이터가 있습니다. 선택한 주차 내용으로 덮어쓰시겠습니까?')) return;
+    setBusy(true);
+    try {
+      await store.loadRosterFromWeek(roster.id);
+      setWeekLoadOpen(false);
+    } catch (err) {
+      console.error('다른 주 불러오기 실패:', err);
+      alert('다른 주 불러오기에 실패했습니다.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   // ── 권한 관리 (admin 전용) ──
@@ -683,6 +772,90 @@ export default function Sidebar() {
           )}
         </div>
       </div>
+
+      {/* 백업/복구 + 다른 주 불러오기 툴바 */}
+      <div className="sidebar-section roster-toolbar">
+        <button className="roster-tool-btn" onClick={handleExport} disabled={busy} title="현재 주차 모든 캠프를 엑셀로 백업">
+          ⬇ 엑셀 백업
+        </button>
+        {isAdmin && (
+          <button
+            className="roster-tool-btn"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={busy}
+            title="엑셀에서 현재 주차 복구 (admin 전용)"
+          >
+            ⬆ 엑셀 복구
+          </button>
+        )}
+        {hasCampInCompany && (
+          <button className="roster-tool-btn" onClick={openWeekLoad} disabled={busy} title="다른 주차 인원/라우트 불러오기">
+            📋 다른 주 불러오기
+          </button>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".xlsx,.xls"
+          style={{ display: 'none' }}
+          onChange={handleImportFile}
+        />
+      </div>
+
+      {/* 엑셀 복구 확인 다이얼로그 */}
+      {importPreview && (
+        <div className="roster-modal-overlay" onClick={() => !busy && setImportPreview(null)}>
+          <div className="roster-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>엑셀 복구 확인</h3>
+            <p>아래 내용으로 현재 주차를 복구합니다. 언급된 캠프의 기존 인원/라우트는 덮어쓰여집니다.</p>
+            <ul className="roster-preview-list">
+              <li>캠프 {importPreview.campCount}개 (추가·갱신만, 삭제 없음)</li>
+              <li>인원 {importPreview.workerCount}명</li>
+              <li>라우트 {importPreview.routeCount}개</li>
+            </ul>
+            <div className="roster-preview-camps">
+              {importPreview.parsed.map((c) => (
+                <div key={c.name} className="roster-preview-camp">
+                  <strong>{c.name}</strong> — 고정 {c.regulars.length} / 백업 {c.backups.length} / 라우트 {c.routes.length}
+                </div>
+              ))}
+            </div>
+            <div className="camp-add-actions">
+              <button className="camp-save-btn" onClick={confirmImport} disabled={busy}>
+                {busy ? '복구 중…' : '복구'}
+              </button>
+              <button className="camp-cancel-btn" onClick={() => setImportPreview(null)} disabled={busy}>취소</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 다른 주 불러오기 모달 */}
+      {weekLoadOpen && (
+        <div className="roster-modal-overlay" onClick={() => !busy && setWeekLoadOpen(false)}>
+          <div className="roster-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>다른 주 불러오기</h3>
+            <p>선택한 주차의 인원·라우트를 현재 주차로 불러옵니다.</p>
+            {weekRosters.length === 0 ? (
+              <div className="perm-empty">불러올 다른 주차가 없습니다.</div>
+            ) : (
+              <ul className="roster-week-list">
+                {weekRosters.map((r) => (
+                  <li key={r.id}>
+                    <button className="roster-week-btn" onClick={() => handleLoadWeek(r)} disabled={busy}>
+                      <span className="roster-week-date">{r.weekStart}</span>
+                      <span className="roster-week-src">{r.source}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="camp-add-actions">
+              <button className="camp-cancel-btn" onClick={() => setWeekLoadOpen(false)} disabled={busy}>닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 고정 인원 */}
       {hasCampInCompany && <div className="sidebar-section">
