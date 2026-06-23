@@ -14,7 +14,7 @@ import './LoginPage.css';
  */
 export default function LoginPage() {
   const { login, loading, error } = useAuthStore();
-  const [userId, setUserId] = useState('admin');
+  const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
 
   async function handleLogin(e: React.FormEvent) {
@@ -32,12 +32,12 @@ export default function LoginPage() {
         {error && <div className="login-error">{error}</div>}
 
         <div className="login-field">
-          <label>아이디</label>
+          <label>관리자 성함</label>
           <input
             type="text"
             value={userId}
             onChange={(e) => setUserId(e.target.value)}
-            placeholder="아이디 입력"
+            placeholder="성함 입력 (예: 홍길동)"
             autoComplete="username"
             autoFocus
           />
