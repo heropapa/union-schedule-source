@@ -48,6 +48,16 @@ export default function AccountManager({ onClose }: { onClose: () => void }) {
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
 
+  async function handleRename(name: string) {
+    const next = prompt(`"${name}" 의 새 이름(성함)을 입력하세요`, name);
+    if (next == null) return;
+    const newName = next.trim();
+    if (!newName || newName === name) return;
+    setBusy(true); setErr(null);
+    try { await db.adminRenameUser(name, newName); await reload(); }
+    catch (e) { fail(e); } finally { setBusy(false); }
+  }
+
   async function handleResetPw(name: string) {
     const pw = prompt(`"${name}" 의 새 비밀번호를 입력하세요`, '5020');
     if (pw == null || pw === '') return;
@@ -128,6 +138,7 @@ export default function AccountManager({ onClose }: { onClose: () => void }) {
                       </button>
                     </td>
                     <td className="acct-actions">
+                      <button onClick={() => handleRename(name)} disabled={busy || name === 'admin'}>이름변경</button>
                       <button onClick={() => handleResetPw(name)} disabled={busy}>비번변경</button>
                       <button
                         className="acct-del"

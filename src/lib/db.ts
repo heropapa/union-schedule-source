@@ -567,3 +567,8 @@ export async function adminDeleteUser(name: string): Promise<void> {
   const { error } = await supabase.rpc('admin_delete_user', { p_name: name });
   if (error) throw error;
 }
+
+export async function adminRenameUser(oldName: string, newName: string): Promise<void> {
+  const { error } = await supabase.rpc('admin_rename_user', { p_old_name: oldName, p_new_name: newName });
+  if (error) throw error;
+}
