@@ -308,22 +308,10 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
     if (!currentWeekStart) return;
 
     for (const pc of parsed) {
-      // 1) 캠프 매칭 (이름) — 없으면 추가, 있으면 wave/업체 갱신. 삭제는 절대 안 함.
-      let camp = get().camps.find((c) => c.name === pc.name);
-      if (!camp) {
-        const id = `camp_${++idCounter}`;
-        const colorIdx = get().camps.length % CAMP_COLORS.length;
-        camp = { id, name: pc.name, wave: pc.wave, color: CAMP_COLORS[colorIdx], companyId: pc.companyId };
-        const newCamp = camp;
-        set((state) => ({ camps: [...state.camps, newCamp] }));
-        await db.upsertCamp(newCamp, get().camps.length - 1);
-      } else if (camp.wave !== pc.wave || camp.companyId !== pc.companyId) {
-        const updated = { ...camp, wave: pc.wave, companyId: pc.companyId };
-        const idx = get().camps.findIndex((c) => c.id === camp!.id);
-        set((state) => ({ camps: state.camps.map((c) => (c.id === updated.id ? updated : c)) }));
-        await db.upsertCamp(updated, idx);
-        camp = updated;
-      }
+      // 1) 캠프 매칭 (이름) — 캠프는 복구 대상이 아님. 이미 있는 캠프만 채우고,
+      //    없는 캠프는 건너뜀 (캠프 생성/수정/삭제 전부 안 함).
+      const camp = get().camps.find((c) => c.name === pc.name);
+      if (!camp) continue;
 
       // 2) 현재 주차 roster 확보 — 없으면 생성, 있으면 비우기
       let roster = await db.fetchRoster(camp.id, currentWeekStart);
