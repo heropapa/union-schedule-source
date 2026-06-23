@@ -201,6 +201,12 @@ export async function deleteWorker(workerId: string): Promise<void> {
   if (error) throw error;
 }
 
+/** 특정 roster의 모든 인원 삭제 (백업 복구/주차 불러오기 시 덮어쓰기용). */
+export async function deleteWorkersByRoster(rosterId: string): Promise<void> {
+  const { error } = await supabase.from('workers').delete().eq('weekly_roster_id', rosterId);
+  if (error) throw error;
+}
+
 // ─── Worker Orders ──────────────────────────────────────
 
 export async function updateWorkerOrders(
@@ -291,6 +297,12 @@ export async function deleteRoute(rosterId: string, routeId: string): Promise<vo
     .delete()
     .eq('weekly_roster_id', rosterId)
     .eq('route_id', routeId);
+  if (error) throw error;
+}
+
+/** 특정 roster의 모든 라우트 삭제 (백업 복구/주차 불러오기 시 덮어쓰기용). */
+export async function deleteRoutesByRoster(rosterId: string): Promise<void> {
+  const { error } = await supabase.from('routes').delete().eq('weekly_roster_id', rosterId);
   if (error) throw error;
 }
 

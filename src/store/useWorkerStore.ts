@@ -3,6 +3,7 @@ import type { Worker, WorkerRole, Route, Camp, WeeklyRoster } from '../types';
 import { ROTATIONS_BY_WAVE } from '../types';
 import { pushHistory } from './historyBridge';
 import * as db from '../lib/db';
+import { exportRosterExcel, type ParsedRosterCamp, type RosterExcelCamp } from '../utils/rosterExcel';
 
 interface OrderMap {
   sidebarRegular: string[];
@@ -45,6 +46,14 @@ interface WorkerState {
   createRosterFresh: () => Promise<void>;
   /** 다른 roster를 복사해서 현재 (camp, week) roster 생성 (인원/라우트만, 셀은 복제 안 함) */
   copyRosterFrom: (sourceRosterId: string) => Promise<void>;
+  /** 다른 주차의 roster(인원/라우트)를 현재 (camp, week)로 불러오기 (덮어쓰기). */
+  loadRosterFromWeek: (sourceRosterId: string) => Promise<void>;
+
+  // ─── 엑셀 백업/복구 (전체 캠프, 현재 주차) ────
+  /** 현재 주차의 모든 캠프 roster를 엑셀 한 파일로 백업 다운로드. */
+  exportAllCamps: () => Promise<void>;
+  /** 엑셀에서 파싱한 캠프들을 현재 주차에 복구 (캠프 upsert + 언급된 캠프의 roster 덮어쓰기). */
+  importAllCamps: (parsed: ParsedRosterCamp[]) => Promise<void>;
 
   // ─── 조회 ────────────────────────────────────
   getWorkersByCamp: (campId: string) => Worker[];
@@ -220,6 +229,143 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
       routes: { [currentCampId]: srcRoutes },
       orders: { [currentCampId]: { ...emptyOrderMap } },
     });
+  },
+
+  loadRosterFromWeek: async (sourceRosterId) => {
+    const { currentCampId, currentWeekStart, currentRoster } = get();
+    if (!currentCampId || !currentWeekStart) return;
+
+    // 1) source roster 의 인원/라우트
+    const [srcWorkers, srcRoutes] = await Promise.all([
+      db.fetchWorkersByRoster(sourceRosterId),
+      db.fetchRoutesByRoster(sourceRosterId),
+    ]);
+
+    // 2) 현재 (camp, week) roster 확보 — 없으면 생성, 있으면 기존 내용 비우기
+    let roster = currentRoster;
+    if (!roster) {
+      roster = await db.createRoster({
+        campId: currentCampId,
+        weekStart: currentWeekStart,
+        source: `copied_from:${sourceRosterId}`,
+      });
+    } else {
+      await Promise.all([
+        db.deleteWorkersByRoster(roster.id),
+        db.deleteRoutesByRoster(roster.id),
+      ]);
+    }
+
+    // 3) source 인원/라우트를 새 id로 복사
+    const copiedWorkers: Worker[] = srcWorkers.map((w) => ({
+      ...w,
+      id: `w_${++idCounter}`,
+      weeklyRosterId: roster!.id,
+      campId: currentCampId,
+    }));
+    await Promise.all(copiedWorkers.map((w, i) => db.upsertWorker(w, i)));
+    await Promise.all(srcRoutes.map((r, i) =>
+      db.upsertRoute(roster!.id, currentCampId, r, i),
+    ));
+
+    // 4) 현재 (camp, week)로 새로고침
+    await get().loadCampWeek(currentCampId, currentWeekStart);
+  },
+
+  // ─── 엑셀 백업/복구 ──────────────────────────
+
+  exportAllCamps: async () => {
+    const { camps, currentWeekStart } = get();
+    if (!currentWeekStart) return;
+
+    const out: RosterExcelCamp[] = [];
+    for (const camp of camps) {
+      const roster = await db.fetchRoster(camp.id, currentWeekStart);
+      let workers: Worker[] = [];
+      let routes: Route[] = [];
+      if (roster) {
+        [workers, routes] = await Promise.all([
+          db.fetchWorkersByRoster(roster.id),
+          db.fetchRoutesByRoster(roster.id),
+        ]);
+      }
+      out.push({
+        name: camp.name,
+        wave: camp.wave,
+        companyId: camp.companyId,
+        regulars: workers.filter((w) => w.role === 'regular'),
+        backups: workers.filter((w) => w.role === 'backup'),
+        routes,
+      });
+    }
+
+    await exportRosterExcel(out, currentWeekStart);
+  },
+
+  importAllCamps: async (parsed) => {
+    const { currentWeekStart, currentCampId } = get();
+    if (!currentWeekStart) return;
+
+    for (const pc of parsed) {
+      // 1) 캠프 매칭 (이름) — 없으면 추가, 있으면 wave/업체 갱신. 삭제는 절대 안 함.
+      let camp = get().camps.find((c) => c.name === pc.name);
+      if (!camp) {
+        const id = `camp_${++idCounter}`;
+        const colorIdx = get().camps.length % CAMP_COLORS.length;
+        camp = { id, name: pc.name, wave: pc.wave, color: CAMP_COLORS[colorIdx], companyId: pc.companyId };
+        const newCamp = camp;
+        set((state) => ({ camps: [...state.camps, newCamp] }));
+        await db.upsertCamp(newCamp, get().camps.length - 1);
+      } else if (camp.wave !== pc.wave || camp.companyId !== pc.companyId) {
+        const updated = { ...camp, wave: pc.wave, companyId: pc.companyId };
+        const idx = get().camps.findIndex((c) => c.id === camp!.id);
+        set((state) => ({ camps: state.camps.map((c) => (c.id === updated.id ? updated : c)) }));
+        await db.upsertCamp(updated, idx);
+        camp = updated;
+      }
+
+      // 2) 현재 주차 roster 확보 — 없으면 생성, 있으면 비우기
+      let roster = await db.fetchRoster(camp.id, currentWeekStart);
+      if (!roster) {
+        roster = await db.createRoster({ campId: camp.id, weekStart: currentWeekStart, source: 'excel' });
+      } else {
+        await Promise.all([
+          db.deleteWorkersByRoster(roster.id),
+          db.deleteRoutesByRoster(roster.id),
+        ]);
+      }
+
+      // 3) 인원 insert (회전 비어있으면 wave 기본값)
+      const defaultRotations = ROTATIONS_BY_WAVE[camp.wave] ?? [];
+      const makeWorker = (pw: ParsedRosterCamp['regulars'][number], role: WorkerRole): Worker => ({
+        id: `w_${++idCounter}`,
+        weeklyRosterId: roster!.id,
+        campId: camp!.id,
+        name: pw.name,
+        loginId: pw.loginId,
+        role,
+        assignedRoutes: pw.assignedRoutes,
+        rotations: pw.rotations.length > 0 ? pw.rotations : [...defaultRotations],
+        phone: pw.phone,
+        vehicle: pw.vehicle,
+        note: pw.note,
+      });
+      const newWorkers = [
+        ...pc.regulars.map((pw) => makeWorker(pw, 'regular')),
+        ...pc.backups.map((pw) => makeWorker(pw, 'backup')),
+      ];
+      await Promise.all(newWorkers.map((w, i) => db.upsertWorker(w, i)));
+
+      // 4) 라우트 insert
+      await Promise.all(pc.routes.map((r, i) =>
+        db.upsertRoute(roster!.id, camp!.id, { id: r.routeId, subRoutes: r.subRoutes }, i),
+      ));
+    }
+
+    // 5) 현재 보고 있는 캠프/주차 새로고침
+    if (currentCampId) {
+      await get().loadCampWeek(currentCampId, currentWeekStart);
+    }
   },
 
   // ─── 조회 ────────────────────────────────────
