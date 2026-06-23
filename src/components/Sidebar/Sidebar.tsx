@@ -290,27 +290,27 @@ export default function Sidebar() {
     }
   };
 
-  const togglePermission = async (userId: string, campId: string) => {
-    const existing = permissions.find(p => p.userId === userId && p.campId === campId);
-    const newCanEdit = !existing?.canEdit;
+  const setUserPerm = async (userId: string, campId: string, level: 'none' | 'read' | 'write') => {
     try {
-      await db.setPermission(userId, campId, newCanEdit);
-      if (newCanEdit) {
-        setPermissions(prev => [
-          ...prev.filter(p => !(p.userId === userId && p.campId === campId)),
-          { userId, campId, canEdit: true },
-        ]);
-      } else {
-        setPermissions(prev => prev.filter(p => !(p.userId === userId && p.campId === campId)));
-      }
+      await db.setPermission(userId, campId, level);
+      setPermissions(prev => {
+        const rest = prev.filter(p => !(p.userId === userId && p.campId === campId));
+        if (level === 'none') return rest;
+        return [...rest, { userId, campId, level, canEdit: level === 'write' }];
+      });
     } catch (err) {
       console.error('권한 변경 실패:', err);
+      alert('권한 변경에 실패했습니다. v1.6 권한 SQL이 적용됐는지 확인하세요.');
     }
   };
   const [selectedCompanyId, setSelectedCompanyId] = useState('union');
   const selectedCompany = COMPANIES.find((c) => c.id === selectedCompanyId) ?? COMPANIES[0];
   const [sidebarWave, setSidebarWave] = useState<'WAVE2' | 'WAVE1'>('WAVE2');
-  const camps = store.camps.filter((c) => (c.companyId ?? 'union') === selectedCompanyId && (c.wave || 'WAVE1') === sidebarWave);
+  const camps = store.camps.filter((c) =>
+    (c.companyId ?? 'union') === selectedCompanyId &&
+    (c.wave || 'WAVE1') === sidebarWave &&
+    (isAdmin || auth.canViewCamp(c.id))   // 비admin은 보기/편집 권한 있는 캠프만
+  );
   const selectedCamp = camps.find((c) => c.id === selectedCampId);
   const hasCampInCompany = !!selectedCamp; // 현재 업체에 선택된 캠프가 있는지
   const campWave = selectedCamp?.wave ?? 'WAVE1';
@@ -612,7 +612,9 @@ export default function Sidebar() {
               onClick={() => {
                 setSelectedCompanyId(co.id);
                 // 업체 변경 시: 해당 업체+현재 웨이브의 첫 캠프 선택, 없으면 빈 값
-                const companyCamps = store.camps.filter((c) => (c.companyId ?? 'union') === co.id && (c.wave || 'WAVE1') === sidebarWave);
+                const companyCamps = store.camps.filter((c) =>
+                  (c.companyId ?? 'union') === co.id && (c.wave || 'WAVE1') === sidebarWave &&
+                  (isAdmin || auth.canViewCamp(c.id)));
                 if (companyCamps.length > 0) selectCamp(companyCamps[0].id); else setcamp('');
               }}
             >
@@ -753,19 +755,24 @@ export default function Sidebar() {
                     />
                     <span>게시판에 공개</span>
                   </label>
-                  <div className="perm-dropdown-title">수정 권한</div>
+                  <div className="perm-dropdown-title">캠프 권한 (없음 / 보기 / 편집)</div>
                   <div className="perm-user-list">
                   {allUsers.map((user) => {
-                    const hasPerm = permissions.some(p => p.userId === user.id && p.campId === camp.id && p.canEdit);
+                    const p = permissions.find(pp => pp.userId === user.id && pp.campId === camp.id);
+                    const level: 'none' | 'read' | 'write' = p ? p.level : 'none';
                     return (
-                      <label key={user.id} className="perm-user-row">
-                        <input
-                          type="checkbox"
-                          checked={hasPerm}
-                          onChange={() => togglePermission(user.id, camp.id)}
-                        />
-                        <span>{user.displayName}</span>
-                      </label>
+                      <div key={user.id} className="perm-user-row">
+                        <span className="perm-user-name">{user.displayName}</span>
+                        <select
+                          className="perm-level-select"
+                          value={level}
+                          onChange={(e) => setUserPerm(user.id, camp.id, e.target.value as 'none' | 'read' | 'write')}
+                        >
+                          <option value="none">없음</option>
+                          <option value="read">보기</option>
+                          <option value="write">편집</option>
+                        </select>
+                      </div>
                     );
                   })}
                   </div>

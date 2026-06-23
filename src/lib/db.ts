@@ -494,24 +494,32 @@ export async function fetchPermissions(): Promise<CampPermission[]> {
     .from('camp_permissions')
     .select('*');
   if (error) throw error;
-  return (data ?? []).map(r => ({
-    userId: r.user_id,
-    campId: r.camp_id,
-    canEdit: r.can_edit,
-  }));
+  return (data ?? []).map(r => {
+    const level: 'read' | 'write' = (r.level === 'read' || r.level === 'write')
+      ? r.level
+      : (r.can_edit ? 'write' : 'read');
+    return {
+      userId: r.user_id,
+      campId: r.camp_id,
+      level,
+      canEdit: level === 'write',
+    };
+  });
 }
 
-export async function setPermission(userId: string, campId: string, canEdit: boolean): Promise<void> {
-  if (canEdit) {
-    const { error } = await supabase.from('camp_permissions').upsert({
-      user_id: userId,
-      camp_id: campId,
-      can_edit: true,
-    });
-    if (error) throw error;
-  } else {
+/** 캠프 권한 설정. level 'none' = 권한 제거(못 봄), 'read' = 보기, 'write' = 편집. */
+export async function setPermission(userId: string, campId: string, level: 'none' | 'read' | 'write'): Promise<void> {
+  if (level === 'none') {
     await supabase.from('camp_permissions').delete().eq('user_id', userId).eq('camp_id', campId);
+    return;
   }
+  const { error } = await supabase.from('camp_permissions').upsert({
+    user_id: userId,
+    camp_id: campId,
+    level,
+    can_edit: level === 'write',
+  });
+  if (error) throw error;
 }
 
 // ─── Users (admin only) ─────────────────────────────────

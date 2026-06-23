@@ -19,6 +19,7 @@ interface AuthState {
   logout: () => Promise<void>;
   isAdmin: () => boolean;
   canEditCamp: (campId: string) => boolean;
+  canViewCamp: (campId: string) => boolean;
   loadPermissions: () => Promise<void>;
 }
 
@@ -100,6 +101,14 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     if (role === 'admin') return true;
     if (!user) return false;
     return permissions.some(p => p.userId === user.id && p.campId === campId && p.canEdit);
+  },
+
+  canViewCamp: (campId: string) => {
+    const { role, user, permissions } = get();
+    if (role === 'admin') return true;
+    if (!user) return false;
+    // 보기 또는 편집 권한이 있으면 볼 수 있음
+    return permissions.some(p => p.userId === user.id && p.campId === campId);
   },
 
   loadPermissions: async () => {

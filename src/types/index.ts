@@ -87,11 +87,15 @@ export interface ScheduleData {
   weeks: WeekSchedule[];
 }
 
+/** 캠프 권한 단계: 없음(행 없음) / 보기 / 편집(보기 포함) */
+export type PermLevel = 'read' | 'write';
+
 /** 캠프 권한 */
 export interface CampPermission {
   userId: string;
   campId: string;
-  canEdit: boolean;
+  canEdit: boolean;     // level === 'write'
+  level: PermLevel;
 }
 
 /** 캠프 잠금 정보 (v1.1: 주차 단위로 분리) */
