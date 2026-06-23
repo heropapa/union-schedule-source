@@ -26,7 +26,7 @@ export interface ParsedRoute {
   subRoutes: string[];
 }
 
-const WORKER_HEADER = ['이름', '아이디', '라우트', '회전', '연락처', '차량', '비고'];
+const WORKER_HEADER = ['이름', '아이디', '라우트', '회전', '비고'];
 const ROUTE_HEADER = ['라우트번호', '서브라우트'];
 
 /** 셀 값 → 문자열 */
@@ -60,13 +60,11 @@ export async function exportWorkersExcel(
       w.loginId || '',
       w.assignedRoutes.join(', '),
       (w.rotations ?? []).join(', '),
-      w.phone ?? '',
-      w.vehicle ?? '',
       w.note ?? '',
     ]);
   }
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [{ wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 20 }];
+  ws['!cols'] = [{ wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 20 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, roleLabel.slice(0, 31));
   XLSX.writeFile(wb, safeFile(`유스프_${campName}_${roleLabel}_${weekStart}.xlsx`));
@@ -89,9 +87,7 @@ export async function parseWorkersExcel(buffer: ArrayBuffer): Promise<ParsedRost
       loginId: str(r[1]),
       assignedRoutes: splitList(r[2]),
       rotations: splitList(r[3]),
-      phone: str(r[4]) || undefined,
-      vehicle: str(r[5]) || undefined,
-      note: str(r[6]) || undefined,
+      note: str(r[4]) || undefined,
     });
   }
   return out;
