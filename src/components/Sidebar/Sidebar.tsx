@@ -108,6 +108,14 @@ function parseRouteList(input: string): { routeId: string; suffixes: string[] }[
   return order.map((routeId) => ({ routeId, suffixes: map.get(routeId)! }));
 }
 
+/** roster.source(내부값) → 사람이 읽을 라벨 */
+function sourceLabel(source: string): string {
+  if (source === 'fresh') return '직접 입력';
+  if (source === 'excel') return '엑셀';
+  if (source.startsWith('copied_from')) return '복사됨';
+  return '';
+}
+
 export default function Sidebar() {
   const { selectedCampId, setcamp, loadCells } = useScheduleStore();
   const store = useWorkerStore();
@@ -218,13 +226,29 @@ export default function Sidebar() {
     }
   }
 
-  /** 섹션 툴바 (⬇ 다운로드 / ⬆ 업로드 / 📋 다른 주) */
+  async function clearSection(section: Section) {
+    if (!canEditSelectedCamp) { alert('이 캠프에 대한 편집 권한이 없습니다.'); return; }
+    if (!confirm(`현재 주차의 ${sectionLabel(section)}을(를) 모두 비우시겠습니까?`)) return;
+    setBusy(true);
+    try {
+      if (section === 'routes') await store.clearRoutesSection();
+      else await store.clearWorkersSection(section);
+    } catch (err) {
+      console.error('비우기 실패:', err);
+      alert(`비우기에 실패했습니다.\n\n${err instanceof Error ? err.message : JSON.stringify(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** 섹션 툴바 (⬇ 다운로드 / ⬆ 업로드 / 📋 다른 주 / 🗑 비우기) */
   function SectionTools({ section }: { section: Section }) {
     return (
       <span className="section-tools">
         <button className="sec-tool-btn" disabled={busy} title="엑셀 다운로드" onClick={() => downloadSection(section)}>⬇</button>
         <button className="sec-tool-btn" disabled={busy} title="엑셀 업로드" onClick={() => triggerUpload(section)}>⬆</button>
         <button className="sec-tool-btn" disabled={busy} title="다른 주 불러오기" onClick={() => openWeekLoad(section)}>📋</button>
+        <button className="sec-tool-btn" disabled={busy} title="현재 주차 비우기" onClick={() => clearSection(section)}>🗑</button>
       </span>
     );
   }
@@ -832,7 +856,7 @@ export default function Sidebar() {
                   <li key={r.id}>
                     <button className="roster-week-btn" onClick={() => pickWeek(r)} disabled={busy}>
                       <span className="roster-week-date">{r.weekStart}</span>
-                      <span className="roster-week-src">{r.source}</span>
+                      <span className="roster-week-src">{sourceLabel(r.source)}</span>
                     </button>
                   </li>
                 ))}

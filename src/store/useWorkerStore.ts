@@ -65,6 +65,10 @@ interface WorkerState {
   copyWorkersFromWeek: (role: WorkerRole, sourceRosterId: string) => Promise<void>;
   /** 다른 주차의 계약라우트를 현재 주차로 복사(덮어쓰기) */
   copyRoutesFromWeek: (sourceRosterId: string) => Promise<void>;
+  /** 현재 캠프·주차의 한 역할 인원 전체 삭제 (섹션 비우기) */
+  clearWorkersSection: (role: WorkerRole) => Promise<void>;
+  /** 현재 캠프·주차의 계약라우트 전체 삭제 (섹션 비우기) */
+  clearRoutesSection: () => Promise<void>;
 
   // ─── 조회 ────────────────────────────────────
   getWorkersByCamp: (campId: string) => Worker[];
@@ -322,6 +326,24 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
   copyRoutesFromWeek: async (sourceRosterId) => {
     const srcRoutes = await db.fetchRoutesByRoster(sourceRosterId);
     await get().importRoutesSection(srcRoutes.map((r) => ({ routeId: r.id, subRoutes: r.subRoutes })));
+  },
+
+  clearWorkersSection: async (role) => {
+    const { currentCampId, currentWeekStart } = get();
+    if (!currentCampId || !currentWeekStart) return;
+    const roster = await db.fetchRoster(currentCampId, currentWeekStart);
+    if (!roster) return;
+    await db.deleteWorkersByRosterRole(roster.id, role);
+    await get().loadCampWeek(currentCampId, currentWeekStart);
+  },
+
+  clearRoutesSection: async () => {
+    const { currentCampId, currentWeekStart } = get();
+    if (!currentCampId || !currentWeekStart) return;
+    const roster = await db.fetchRoster(currentCampId, currentWeekStart);
+    if (!roster) return;
+    await db.deleteRoutesByRoster(roster.id);
+    await get().loadCampWeek(currentCampId, currentWeekStart);
   },
 
   // ─── 조회 ────────────────────────────────────
