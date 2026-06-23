@@ -48,10 +48,10 @@ jobs:
         run: npm run build
         env:
           VITE_BASE: /union-schedule-source/
-          # secret이 등록돼 있으면 그걸 우선 사용, 없으면 공개 기본값(미리보기용) 사용.
           # anon/publishable 키는 브라우저에 공개되도록 설계된 공개 키라 미리보기에 넣어도 안전.
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://nxkobjmnlutcwbtoaneu.supabase.co' }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'sb_publishable_AW71GyasVHJw2hRND0x22w_vn45P11M' }}
+          # (실제 사이트도 이미 이 키를 클라이언트에 노출함)
+          VITE_SUPABASE_URL: "https://nxkobjmnlutcwbtoaneu.supabase.co"
+          VITE_SUPABASE_ANON_KEY: "sb_publishable_AW71GyasVHJw2hRND0x22w_vn45P11M"
 
       - name: Pages 설정
         uses: actions/configure-pages@v5
