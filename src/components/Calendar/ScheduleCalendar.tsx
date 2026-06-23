@@ -129,6 +129,7 @@ export default function ScheduleCalendar() {
       await Promise.all(routes.map((r, i) => db.upsertRoute(roster.id, campId, r, i)));
       if (cells.length) await db.upsertCellsBatch(cells, campId);
 
+      useHistoryStore.getState().setDirty(false);
       setToast('저장 완료 ✓');
     } catch (err: unknown) {
       console.error('저장 실패:', err);
@@ -149,6 +150,11 @@ export default function ScheduleCalendar() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [handleSave]);
+
+  // 캠프/주차 전환 시 "변경 없음" 으로 초기화 (새로 로드된 데이터는 저장 상태)
+  useEffect(() => {
+    useHistoryStore.getState().setDirty(false);
+  }, [store.selectedCampId, store.weekStart]);
 
   // ── 이미지 다운로드 (이름순 정렬 후 캡처) ──
   const [capturing, setCapturing] = useState(false);
@@ -725,10 +731,10 @@ export default function ScheduleCalendar() {
           <button
             className="toolbar-btn save-btn"
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || !history.dirty}
             title="저장 (Ctrl+S)"
           >
-            {saving ? '저장 중...' : '저장'}
+            {saving ? '저장 중...' : history.dirty ? '저장' : '저장됨 ✓'}
           </button>
           <button
             className="toolbar-btn board-btn"
