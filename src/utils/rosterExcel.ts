@@ -1,11 +1,12 @@
 /**
  * 캠프별·주별 roster 엑셀 백업/복구 유틸 (유스프 v1.1)
  *
- * 한 파일에 시트 4개:
- *   - 캠프목록:   캠프명 | 주야 | 업체
- *   - 고정인원:   캠프 | 이름 | 아이디 | 라우트 | 회전 | 연락처 | 차량 | 비고
- *   - 백업인원:   (고정인원과 동일 컬럼)
- *   - 계약라우트: 캠프 | 라우트번호 | 서브라우트
+ * 구조: 캠프(+주야)마다 시트 1개. 시트 이름 = "캠프명 주야".
+ * 각 시트 안에 섹션 3개:
+ *   ■ 계약라우트   : 라우트번호 | 서브라우트
+ *   ■ 고정인원     : 이름 | 아이디 | 라우트 | 회전 | 연락처 | 차량 | 비고
+ *   ■ 백업인원     : (고정인원과 동일 컬럼)
+ * 시트 첫 줄에 캠프 메타: 캠프 | <이름> | 주야 | <주간/야간> | 업체 | <업체명>
  *
  * xlsx 는 번들 분리를 위해 lazy import.
  */
@@ -46,6 +47,11 @@ export interface ParsedRosterCamp {
 const WAVE_TO_LABEL: Record<string, string> = { WAVE1: '야간', WAVE2: '주간' };
 const LABEL_TO_WAVE: Record<string, string> = { 야간: 'WAVE1', 주간: 'WAVE2' };
 
+const SEC_ROUTES = '■ 계약라우트';
+const SEC_REGULAR = '■ 고정인원';
+const SEC_BACKUP = '■ 백업인원';
+const WORKER_HEADER = ['이름', '아이디', '라우트', '회전', '연락처', '차량', '비고'];
+
 function companyLabel(companyId: string): string {
   return COMPANIES.find((c) => c.id === companyId)?.label ?? companyId;
 }
@@ -54,11 +60,31 @@ function labelToCompanyId(label: string): string {
   return COMPANIES.find((c) => c.label === trimmed || c.id === trimmed)?.id ?? 'union';
 }
 
-const WORKER_HEADER = ['캠프', '이름', '아이디', '라우트', '회전', '연락처', '차량', '비고'];
+/** 셀 값 → 문자열 */
+function str(v: unknown): string {
+  return v == null ? '' : String(v).trim();
+}
+/** 쉼표 구분 → 배열 */
+function splitList(v: unknown): string[] {
+  return str(v).split(',').map((s) => s.trim()).filter(Boolean);
+}
 
-function workerRow(campName: string, w: Worker): (string)[] {
+/** 엑셀 시트 이름 규칙: 31자 이하 + 금지문자 제거 + 중복 회피 */
+function safeSheetName(base: string, used: Set<string>): string {
+  let name = base.replace(/[\\/?*[\]:]/g, ' ').trim().slice(0, 31) || 'sheet';
+  if (used.has(name)) {
+    for (let i = 2; ; i++) {
+      const suffix = ` (${i})`;
+      const candidate = name.slice(0, 31 - suffix.length) + suffix;
+      if (!used.has(candidate)) { name = candidate; break; }
+    }
+  }
+  used.add(name);
+  return name;
+}
+
+function workerRow(w: Worker): string[] {
   return [
-    campName,
     w.name,
     w.loginId || '',
     w.assignedRoutes.join(', '),
@@ -69,167 +95,141 @@ function workerRow(campName: string, w: Worker): (string)[] {
   ];
 }
 
-/** 현재 주차 모든 캠프 → 엑셀 파일 다운로드 */
+/** 현재 주차 모든 캠프 → 엑셀 파일 다운로드 (캠프마다 시트 1개) */
 export async function exportRosterExcel(camps: RosterExcelCamp[], weekStart: string): Promise<void> {
   const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
+  const usedNames = new Set<string>();
 
-  // 1) 캠프목록
-  const campRows: string[][] = [['캠프명', '주야', '업체']];
   for (const c of camps) {
-    campRows.push([c.name, WAVE_TO_LABEL[c.wave] ?? c.wave, companyLabel(c.companyId)]);
-  }
-  const campWs = XLSX.utils.aoa_to_sheet(campRows);
-  campWs['!cols'] = [{ wch: 14 }, { wch: 8 }, { wch: 14 }];
-  XLSX.utils.book_append_sheet(wb, campWs, '캠프목록');
+    const waveLabel = WAVE_TO_LABEL[c.wave] ?? c.wave;
+    const rows: string[][] = [];
 
-  // 2) 고정인원
-  const regRows: string[][] = [WORKER_HEADER];
-  for (const c of camps) {
-    for (const w of c.regulars) regRows.push(workerRow(c.name, w));
-  }
-  const regWs = XLSX.utils.aoa_to_sheet(regRows);
-  regWs['!cols'] = [{ wch: 14 }, { wch: 8 }, { wch: 14 }, { wch: 22 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 20 }];
-  XLSX.utils.book_append_sheet(wb, regWs, '고정인원');
+    // 캠프 메타
+    rows.push(['캠프', c.name, '주야', waveLabel, '업체', companyLabel(c.companyId)]);
+    rows.push([]);
 
-  // 3) 백업인원
-  const backRows: string[][] = [WORKER_HEADER];
-  for (const c of camps) {
-    for (const w of c.backups) backRows.push(workerRow(c.name, w));
-  }
-  const backWs = XLSX.utils.aoa_to_sheet(backRows);
-  backWs['!cols'] = regWs['!cols'];
-  XLSX.utils.book_append_sheet(wb, backWs, '백업인원');
+    // 계약라우트
+    rows.push([SEC_ROUTES]);
+    rows.push(['라우트번호', '서브라우트']);
+    for (const r of c.routes) rows.push([r.id, r.subRoutes.join(', ')]);
+    rows.push([]);
 
-  // 4) 계약라우트
-  const routeRows: string[][] = [['캠프', '라우트번호', '서브라우트']];
-  for (const c of camps) {
-    for (const r of c.routes) routeRows.push([c.name, r.id, r.subRoutes.join(', ')]);
+    // 고정인원
+    rows.push([SEC_REGULAR]);
+    rows.push([...WORKER_HEADER]);
+    for (const w of c.regulars) rows.push(workerRow(w));
+    rows.push([]);
+
+    // 백업인원
+    rows.push([SEC_BACKUP]);
+    rows.push([...WORKER_HEADER]);
+    for (const w of c.backups) rows.push(workerRow(w));
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{ wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 20 }];
+    const sheetName = safeSheetName(`${c.name} ${waveLabel}`, usedNames);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
   }
-  const routeWs = XLSX.utils.aoa_to_sheet(routeRows);
-  routeWs['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 30 }];
-  XLSX.utils.book_append_sheet(wb, routeWs, '계약라우트');
+
+  // 캠프가 하나도 없으면 빈 시트라도
+  if (camps.length === 0) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['데이터 없음']]), 'empty');
+  }
 
   XLSX.writeFile(wb, `유스프_백업_${weekStart}.xlsx`);
 }
 
-/** 셀 값을 문자열로 */
-function str(v: unknown): string {
-  return v == null ? '' : String(v).trim();
-}
-/** 쉼표 구분 → 배열 */
-function splitList(v: unknown): string[] {
-  return str(v).split(',').map((s) => s.trim()).filter(Boolean);
-}
-
-/** 헤더 행에서 컬럼 인덱스를 키워드로 찾음 */
-function indexer(header: unknown[]) {
-  const cols = header.map((h) => str(h));
-  return (keyword: string) => cols.findIndex((h) => h.includes(keyword));
-}
-
-function parseWorkerSheet(
-  XLSX: typeof import('xlsx'),
-  wb: import('xlsx').WorkBook,
-  sheetName: string,
-): Map<string, ParsedRosterWorker[]> {
-  const result = new Map<string, ParsedRosterWorker[]>();
-  const ws = wb.Sheets[sheetName];
-  if (!ws) return result;
-  const raw = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1 });
-  if (raw.length < 2) return result;
-
-  const idx = indexer(raw[0]);
-  const c = {
-    camp: idx('캠프'),
-    name: idx('이름'),
-    loginId: idx('아이디'),
-    routes: idx('라우트'),
-    rotations: idx('회전'),
-    phone: idx('연락처'),
-    vehicle: idx('차량'),
-    note: idx('비고'),
-  };
-
-  for (let i = 1; i < raw.length; i++) {
-    const r = raw[i];
-    if (!r || r.length === 0) continue;
-    const campName = c.camp >= 0 ? str(r[c.camp]) : '';
-    const name = c.name >= 0 ? str(r[c.name]) : '';
-    if (!campName || !name) continue;
-    const worker: ParsedRosterWorker = {
-      name,
-      loginId: c.loginId >= 0 ? str(r[c.loginId]) : '',
-      assignedRoutes: c.routes >= 0 ? splitList(r[c.routes]) : [],
-      rotations: c.rotations >= 0 ? splitList(r[c.rotations]) : [],
-      phone: c.phone >= 0 ? str(r[c.phone]) || undefined : undefined,
-      vehicle: c.vehicle >= 0 ? str(r[c.vehicle]) || undefined : undefined,
-      note: c.note >= 0 ? str(r[c.note]) || undefined : undefined,
-    };
-    const list = result.get(campName) ?? [];
-    list.push(worker);
-    result.set(campName, list);
+/** 한 행에서 라벨 다음 칸 값을 찾음 (예: ['캠프','부산2',...] 에서 '캠프'→'부산2') */
+function valueAfter(row: unknown[], label: string): string {
+  for (let i = 0; i < row.length; i++) {
+    if (str(row[i]) === label) return str(row[i + 1]);
   }
-  return result;
+  return '';
 }
 
-/** 엑셀 파일 → 캠프별 파싱 결과 (캠프목록 시트 기준) */
+/** 한 시트 → ParsedRosterCamp (없으면 null) */
+function parseSheet(rows: unknown[][]): ParsedRosterCamp | null {
+  if (!rows.length) return null;
+
+  // 캠프 메타 (보통 첫 줄)
+  let name = '';
+  let waveLabel = '';
+  let companyText = '';
+  for (const r of rows.slice(0, 3)) {
+    if (!name) name = valueAfter(r, '캠프');
+    if (!waveLabel) waveLabel = valueAfter(r, '주야');
+    if (!companyText) companyText = valueAfter(r, '업체');
+  }
+  if (!name) return null;
+
+  const routes: { routeId: string; subRoutes: string[] }[] = [];
+  const regulars: ParsedRosterWorker[] = [];
+  const backups: ParsedRosterWorker[] = [];
+
+  type Section = 'none' | 'routes' | 'regular' | 'backup';
+  let section: Section = 'none';
+  let expectHeader = false;
+
+  for (const r of rows) {
+    const first = str(r[0]);
+
+    // 섹션 마커 감지
+    if (first.includes('계약라우트')) { section = 'routes'; expectHeader = true; continue; }
+    if (first.includes('고정인원')) { section = 'regular'; expectHeader = true; continue; }
+    if (first.includes('백업인원')) { section = 'backup'; expectHeader = true; continue; }
+
+    // 빈 행 → 섹션 종료
+    if (r.every((c) => str(c) === '')) { section = 'none'; continue; }
+
+    // 섹션 헤더 행 건너뛰기
+    if (expectHeader) { expectHeader = false; continue; }
+
+    if (section === 'routes') {
+      const routeId = str(r[0]);
+      if (routeId) routes.push({ routeId, subRoutes: splitList(r[1]) });
+    } else if (section === 'regular' || section === 'backup') {
+      const wName = str(r[0]);
+      if (!wName) continue;
+      const worker: ParsedRosterWorker = {
+        name: wName,
+        loginId: str(r[1]),
+        assignedRoutes: splitList(r[2]),
+        rotations: splitList(r[3]),
+        phone: str(r[4]) || undefined,
+        vehicle: str(r[5]) || undefined,
+        note: str(r[6]) || undefined,
+      };
+      (section === 'regular' ? regulars : backups).push(worker);
+    }
+  }
+
+  return {
+    name,
+    wave: LABEL_TO_WAVE[waveLabel] ?? (waveLabel || 'WAVE1'),
+    companyId: companyText ? labelToCompanyId(companyText) : 'union',
+    regulars,
+    backups,
+    routes,
+  };
+}
+
+/** 엑셀 파일 → 캠프별 파싱 결과 (시트마다 캠프 1개) */
 export async function parseRosterExcel(buffer: ArrayBuffer): Promise<ParsedRosterCamp[]> {
   const XLSX = await import('xlsx');
   const wb = XLSX.read(buffer, { type: 'array' });
 
-  // 캠프목록 시트
-  const campWs = wb.Sheets['캠프목록'];
-  if (!campWs) throw new Error("'캠프목록' 시트가 없습니다.");
-  const campRaw = XLSX.utils.sheet_to_json<unknown[]>(campWs, { header: 1 });
-  if (campRaw.length < 2) throw new Error('캠프목록이 비어 있습니다.');
-
-  const campIdx = indexer(campRaw[0]);
-  const cName = campIdx('캠프');
-  const cWave = campIdx('주야');
-  const cCompany = campIdx('업체');
-
-  const regByCamp = parseWorkerSheet(XLSX, wb, '고정인원');
-  const backByCamp = parseWorkerSheet(XLSX, wb, '백업인원');
-
-  // 계약라우트 시트
-  const routeByCamp = new Map<string, { routeId: string; subRoutes: string[] }[]>();
-  const routeWs = wb.Sheets['계약라우트'];
-  if (routeWs) {
-    const routeRaw = XLSX.utils.sheet_to_json<unknown[]>(routeWs, { header: 1 });
-    if (routeRaw.length >= 2) {
-      const rIdx = indexer(routeRaw[0]);
-      const rCamp = rIdx('캠프');
-      const rNum = rIdx('라우트번호');
-      const rSub = rIdx('서브라우트');
-      for (let i = 1; i < routeRaw.length; i++) {
-        const r = routeRaw[i];
-        if (!r || r.length === 0) continue;
-        const campName = rCamp >= 0 ? str(r[rCamp]) : '';
-        const routeId = rNum >= 0 ? str(r[rNum]) : '';
-        if (!campName || !routeId) continue;
-        const list = routeByCamp.get(campName) ?? [];
-        list.push({ routeId, subRoutes: rSub >= 0 ? splitList(r[rSub]) : [] });
-        routeByCamp.set(campName, list);
-      }
-    }
+  const camps: ParsedRosterCamp[] = [];
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, blankrows: true });
+    const camp = parseSheet(rows);
+    if (camp) camps.push(camp);
   }
 
-  const camps: ParsedRosterCamp[] = [];
-  for (let i = 1; i < campRaw.length; i++) {
-    const r = campRaw[i];
-    if (!r || r.length === 0) continue;
-    const name = cName >= 0 ? str(r[cName]) : '';
-    if (!name) continue;
-    const waveLabel = cWave >= 0 ? str(r[cWave]) : '';
-    camps.push({
-      name,
-      wave: LABEL_TO_WAVE[waveLabel] ?? (waveLabel || 'WAVE1'),
-      companyId: cCompany >= 0 ? labelToCompanyId(str(r[cCompany])) : 'union',
-      regulars: regByCamp.get(name) ?? [],
-      backups: backByCamp.get(name) ?? [],
-      routes: routeByCamp.get(name) ?? [],
-    });
+  if (camps.length === 0) {
+    throw new Error('캠프 시트를 찾을 수 없습니다. 시트 첫 줄에 "캠프 | <이름>" 형식이 필요합니다.');
   }
   return camps;
 }
