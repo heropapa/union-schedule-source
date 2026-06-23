@@ -217,7 +217,8 @@ export default function Sidebar() {
       setWeekLoadOpen(false);
     } catch (err) {
       console.error('다른 주 불러오기 실패:', err);
-      alert('다른 주 불러오기에 실패했습니다.');
+      const msg = err instanceof Error ? err.message : JSON.stringify(err);
+      alert('다른 주 불러오기에 실패했습니다.\n\n' + msg);
     } finally {
       setBusy(false);
     }
