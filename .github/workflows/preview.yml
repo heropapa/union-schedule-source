@@ -1,0 +1,64 @@
+name: 미리보기 배포 (Preview)
+
+# 푸시할 때마다 소스 repo의 GitHub Pages에 "확인용 미리보기" 사이트를 자동 배포.
+# 실제 사용자 사이트(union-schedule-test1)는 건드리지 않음.
+#
+# ▶ 동작하려면 1회 세팅 필요:
+#   1) Settings → Pages → Source 를 "GitHub Actions" 로
+#   2) Settings → Secrets and variables → Actions 에 secret 2개 등록:
+#        VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
+#
+# 미리보기 주소: https://heropapa.github.io/union-schedule-source/
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 동시에 여러 푸시가 와도 마지막 것만 배포
+concurrency:
+  group: preview-pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Node 설치
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 빌드
+        run: npm run build
+        env:
+          VITE_BASE: /union-schedule-source/
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: Pages 설정
+        uses: actions/configure-pages@v5
+
+      - name: 산출물 업로드
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist
+
+      - name: 배포
+        id: deploy
+        uses: actions/deploy-pages@v4
