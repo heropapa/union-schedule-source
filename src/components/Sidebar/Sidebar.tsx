@@ -90,6 +90,24 @@ function parseRouteInput(input: string): { routeId: string; suffixes: string[] }
   return { routeId, suffixes };
 }
 
+/**
+ * 여러 라우트/서브라우트를 한 번에 파싱.
+ * "701A, 701B, 702A, 707ABC, 708" 같은 입력을 라우트번호별로 묶어
+ * [{ routeId:'701', suffixes:['A','B'] }, ...] 로 반환 (순서 보존, 중복 제거).
+ */
+function parseRouteList(input: string): { routeId: string; suffixes: string[] }[] {
+  const tokens = input.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean);
+  const order: string[] = [];
+  const map = new Map<string, string[]>();
+  for (const tok of tokens) {
+    const { routeId, suffixes } = parseRouteInput(tok);
+    if (!map.has(routeId)) { map.set(routeId, []); order.push(routeId); }
+    const cur = map.get(routeId)!;
+    for (const s of suffixes) if (!cur.includes(s)) cur.push(s);
+  }
+  return order.map((routeId) => ({ routeId, suffixes: map.get(routeId)! }));
+}
+
 export default function Sidebar() {
   const { selectedCampId, setcamp, loadCells } = useScheduleStore();
   const store = useWorkerStore();
@@ -473,8 +491,19 @@ export default function Sidebar() {
     const val = addRouteValue.trim();
     if (!val) { cancelAdd(); return; }
     withCampPermission(() => {
-      const { routeId, suffixes } = parseRouteInput(val);
-      store.addRoute(selectedCampId, routeId, suffixes);
+      const groups = parseRouteList(val);
+      const existing = store.getRoutes(selectedCampId);
+      for (const g of groups) {
+        const ex = existing.find((r) => r.id === g.routeId);
+        if (ex) {
+          // 이미 있는 라우트면 서브라우트 합치기 (중복 제거)
+          const subRoutes = g.suffixes.map((s) => `${g.routeId}${s}`);
+          const merged = Array.from(new Set([...ex.subRoutes, ...subRoutes]));
+          store.updateRouteSubRoutes(selectedCampId, g.routeId, merged);
+        } else {
+          store.addRoute(selectedCampId, g.routeId, g.suffixes);
+        }
+      }
     });
     cancelAdd();
   }
@@ -1160,7 +1189,7 @@ export default function Sidebar() {
                 if (e.key === 'Escape') cancelAdd();
               }}
               onBlur={commitRouteAdd}
-              placeholder="예: 707 또는 707ABC"
+              placeholder="예: 707 / 707ABC / 701A, 701B, 702A ..."
             />
           </div>
         )}
