@@ -66,14 +66,6 @@ export default function AccountManager({ onClose }: { onClose: () => void }) {
     catch (e) { fail(e); } finally { setBusy(false); }
   }
 
-  async function handleToggleRole(name: string, current: string) {
-    const next = current === 'admin' ? 'viewer' : 'admin';
-    if (!confirm(`"${name}" 권한을 ${next === 'admin' ? '관리자' : '뷰어'}로 변경할까요?`)) return;
-    setBusy(true); setErr(null);
-    try { await db.adminSetRole(name, next); await reload(); }
-    catch (e) { fail(e); } finally { setBusy(false); }
-  }
-
   async function handleDelete(name: string) {
     if (!confirm(`"${name}" 계정을 삭제할까요? 되돌릴 수 없습니다.`)) return;
     setBusy(true); setErr(null);
@@ -118,25 +110,14 @@ export default function AccountManager({ onClose }: { onClose: () => void }) {
         ) : (
           <table className="acct-table">
             <thead>
-              <tr><th>성함</th><th>권한</th><th>작업</th></tr>
+              <tr><th>성함</th><th>작업</th></tr>
             </thead>
             <tbody>
               {users.map((u) => {
                 const name = toDisplayName(u.email) || u.displayName;
-                const isAdmin = u.role === 'admin';
                 return (
                   <tr key={u.id}>
                     <td>{u.displayName || name}</td>
-                    <td>
-                      <button
-                        className={`acct-role ${isAdmin ? 'admin' : 'viewer'}`}
-                        onClick={() => handleToggleRole(name, u.role)}
-                        disabled={busy}
-                        title="클릭하여 권한 변경"
-                      >
-                        {isAdmin ? '관리자' : '뷰어'}
-                      </button>
-                    </td>
                     <td className="acct-actions">
                       <button onClick={() => handleRename(name)} disabled={busy || name === 'admin'}>이름변경</button>
                       <button onClick={() => handleResetPw(name)} disabled={busy}>비번변경</button>
