@@ -3,6 +3,7 @@ import { useScheduleStore } from '../../store/useScheduleStore';
 import { useWorkerStore } from '../../store/useWorkerStore';
 import { useHistoryStore } from '../../store/useHistoryStore';
 import type { ScheduleImportResult } from '../../utils/importScheduleExcel';
+import AccountManager from '../Admin/AccountManager';
 import { markDirty } from '../../store/historyBridge';
 import { DAY_LABELS, COMPANIES } from '../../types';
 import type { Worker, CellStatus, CampLock } from '../../types';
@@ -77,6 +78,7 @@ export default function ScheduleCalendar() {
   const importFileRef = useRef<HTMLInputElement>(null);
   const importFormatRef = useRef<'일반' | '어드민'>('일반');
   const [importReport, setImportReport] = useState<ScheduleImportResult | null>(null);
+  const [showAccounts, setShowAccounts] = useState(false);
 
   function triggerImport(format: '일반' | '어드민') {
     setShowExportMenu(false);
@@ -856,6 +858,11 @@ export default function ScheduleCalendar() {
           <span className="toolbar-user" title={auth.user?.email ?? ''}>
             {auth.role === 'admin' ? '[관리자]' : '[뷰어]'} {toDisplayName(auth.user?.email ?? '')}
           </span>
+          {auth.role === 'admin' && (
+            <button className="toolbar-btn" onClick={() => setShowAccounts(true)} title="계정 관리">
+              👤 계정관리
+            </button>
+          )}
           <button className="toolbar-btn logout-btn" onClick={auth.logout} title="로그아웃">
             로그아웃
           </button>
@@ -1126,6 +1133,9 @@ export default function ScheduleCalendar() {
           </div>
         </div>
       )}
+
+      {/* 계정 관리 (admin) */}
+      {showAccounts && <AccountManager onClose={() => setShowAccounts(false)} />}
 
       {/* 토스트 */}
       {toast && <div className="toast-message">{toast}</div>}

@@ -536,3 +536,26 @@ export async function fetchAllUsers(): Promise<UserProfile[]> {
     displayName: r.display_name,
   }));
 }
+
+// ─── 계정 관리 RPC (admin 전용, v1.5) ────────────────────
+// SECURITY DEFINER 함수 호출. 함수 내부에서 admin 여부를 검증함.
+
+export async function adminCreateUser(name: string, password: string, role: 'admin' | 'viewer' = 'viewer'): Promise<void> {
+  const { error } = await supabase.rpc('admin_create_user', { p_name: name, p_password: password, p_role: role });
+  if (error) throw error;
+}
+
+export async function adminSetPassword(name: string, password: string): Promise<void> {
+  const { error } = await supabase.rpc('admin_set_password', { p_name: name, p_password: password });
+  if (error) throw error;
+}
+
+export async function adminSetRole(name: string, role: 'admin' | 'viewer'): Promise<void> {
+  const { error } = await supabase.rpc('admin_set_role', { p_name: name, p_role: role });
+  if (error) throw error;
+}
+
+export async function adminDeleteUser(name: string): Promise<void> {
+  const { error } = await supabase.rpc('admin_delete_user', { p_name: name });
+  if (error) throw error;
+}
