@@ -232,7 +232,7 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
   },
 
   loadRosterFromWeek: async (sourceRosterId) => {
-    const { currentCampId, currentWeekStart, currentRoster } = get();
+    const { currentCampId, currentWeekStart } = get();
     if (!currentCampId || !currentWeekStart) return;
 
     // 1) source roster 의 인원/라우트
@@ -241,8 +241,9 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
       db.fetchRoutesByRoster(sourceRosterId),
     ]);
 
-    // 2) 현재 (camp, week) roster 확보 — 없으면 생성, 있으면 기존 내용 비우기
-    let roster = currentRoster;
+    // 2) 현재 (camp, week) roster 확보 — state 대신 DB에서 직접 조회 (중복 생성 방지).
+    //    있으면 기존 인원/라우트 비우고, 없으면 새로 생성.
+    let roster = await db.fetchRoster(currentCampId, currentWeekStart);
     if (!roster) {
       roster = await db.createRoster({
         campId: currentCampId,
