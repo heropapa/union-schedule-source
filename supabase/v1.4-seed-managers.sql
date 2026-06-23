@@ -34,13 +34,18 @@ begin
     insert into auth.users (
       instance_id, id, aud, role, email, encrypted_password,
       email_confirmed_at, created_at, updated_at,
-      raw_app_meta_data, raw_user_meta_data
+      raw_app_meta_data, raw_user_meta_data,
+      -- GoTrue가 NULL이면 "Database error querying schema"로 터지므로 빈 문자열로 채움
+      confirmation_token, recovery_token, email_change,
+      email_change_token_new, email_change_token_current,
+      phone_change, phone_change_token, reauthentication_token
     ) values (
       '00000000-0000-0000-0000-000000000000', uid, 'authenticated', 'authenticated',
       em, crypt('5020', gen_salt('bf')),
       now(), now(), now(),
       '{"provider":"email","providers":["email"]}'::jsonb,
-      jsonb_build_object('display_name', nm)
+      jsonb_build_object('display_name', nm),
+      '', '', '', '', '', '', '', ''
     );
 
     insert into auth.identities (
