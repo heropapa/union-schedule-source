@@ -115,9 +115,13 @@ export default function AccountManager({ onClose }: { onClose: () => void }) {
             <tbody>
               {users.map((u) => {
                 const name = toDisplayName(u.email) || u.displayName;
+                // 표시이름과 실제 로그인 아이디(이메일 앞부분)가 다르면 둘 다 보여줌
+                const label = u.displayName && u.displayName !== name
+                  ? `${u.displayName} (로그인: ${name})`
+                  : name;
                 return (
                   <tr key={u.id}>
-                    <td>{u.displayName || name}</td>
+                    <td>{label}</td>
                     <td className="acct-actions">
                       <button onClick={() => handleRename(name)} disabled={busy || name === 'admin'}>이름변경</button>
                       <button onClick={() => handleResetPw(name)} disabled={busy}>비번변경</button>
