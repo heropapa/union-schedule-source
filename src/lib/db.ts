@@ -207,6 +207,16 @@ export async function deleteWorkersByRoster(rosterId: string): Promise<void> {
   if (error) throw error;
 }
 
+/** 특정 roster에서 한 역할(고정/백업)의 인원만 삭제 (섹션별 복구용). */
+export async function deleteWorkersByRosterRole(rosterId: string, role: 'regular' | 'backup'): Promise<void> {
+  const { error } = await supabase
+    .from('workers')
+    .delete()
+    .eq('weekly_roster_id', rosterId)
+    .eq('role', role);
+  if (error) throw error;
+}
+
 // ─── Worker Orders ──────────────────────────────────────
 
 export async function updateWorkerOrders(

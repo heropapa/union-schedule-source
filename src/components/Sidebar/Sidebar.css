@@ -1037,3 +1037,21 @@
   font-size: 11px;
   color: #888;
 }
+
+/* ── 섹션별 엑셀/불러오기 툴바 ── */
+.section-tools {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+}
+.sec-tool-btn {
+  border: 1px solid #d0d0d0;
+  background: #f7f7f7;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 5px;
+  cursor: pointer;
+}
+.sec-tool-btn:hover:not(:disabled) { background: #ececec; }
+.sec-tool-btn:disabled { opacity: 0.45; cursor: not-allowed; }

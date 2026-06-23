@@ -3,7 +3,12 @@ import type { Worker, WorkerRole, Route, Camp, WeeklyRoster } from '../types';
 import { ROTATIONS_BY_WAVE } from '../types';
 import { pushHistory } from './historyBridge';
 import * as db from '../lib/db';
-import { exportRosterExcel, type ParsedRosterCamp, type RosterExcelCamp } from '../utils/rosterExcel';
+import {
+  exportWorkersExcel,
+  exportRoutesExcel,
+  type ParsedRosterWorker,
+  type ParsedRoute,
+} from '../utils/rosterExcel';
 
 interface OrderMap {
   sidebarRegular: string[];
@@ -46,14 +51,20 @@ interface WorkerState {
   createRosterFresh: () => Promise<void>;
   /** 다른 roster를 복사해서 현재 (camp, week) roster 생성 (인원/라우트만, 셀은 복제 안 함) */
   copyRosterFrom: (sourceRosterId: string) => Promise<void>;
-  /** 다른 주차의 roster(인원/라우트)를 현재 (camp, week)로 불러오기 (덮어쓰기). */
-  loadRosterFromWeek: (sourceRosterId: string) => Promise<void>;
 
-  // ─── 엑셀 백업/복구 (전체 캠프, 현재 주차) ────
-  /** 현재 주차의 모든 캠프 roster를 엑셀 한 파일로 백업 다운로드. */
-  exportAllCamps: () => Promise<void>;
-  /** 엑셀에서 파싱한 캠프들을 현재 주차에 복구 (캠프 upsert + 언급된 캠프의 roster 덮어쓰기). */
-  importAllCamps: (parsed: ParsedRosterCamp[]) => Promise<void>;
+  // ─── 섹션별 엑셀/복사 (선택 캠프 × 현재 주차) ──
+  /** 현재 캠프·주차의 한 역할 인원을 엑셀로 다운로드 */
+  exportWorkersSection: (role: WorkerRole) => Promise<void>;
+  /** 현재 캠프·주차의 계약라우트를 엑셀로 다운로드 */
+  exportRoutesSection: () => Promise<void>;
+  /** 엑셀에서 읽은 인원으로 현재 캠프·주차의 해당 역할을 덮어쓰기 */
+  importWorkersSection: (role: WorkerRole, parsed: ParsedRosterWorker[]) => Promise<void>;
+  /** 엑셀에서 읽은 라우트로 현재 캠프·주차의 계약라우트를 덮어쓰기 */
+  importRoutesSection: (parsed: ParsedRoute[]) => Promise<void>;
+  /** 다른 주차의 해당 역할 인원을 현재 주차로 복사(덮어쓰기) */
+  copyWorkersFromWeek: (role: WorkerRole, sourceRosterId: string) => Promise<void>;
+  /** 다른 주차의 계약라우트를 현재 주차로 복사(덮어쓰기) */
+  copyRoutesFromWeek: (sourceRosterId: string) => Promise<void>;
 
   // ─── 조회 ────────────────────────────────────
   getWorkersByCamp: (campId: string) => Worker[];
@@ -231,130 +242,86 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
     });
   },
 
-  loadRosterFromWeek: async (sourceRosterId) => {
-    const { currentCampId, currentWeekStart } = get();
+  // ─── 섹션별 엑셀/복사 ────────────────────────
+
+  /** 현재 (camp, week) roster를 DB에서 확보 (없으면 생성). */
+  // (내부 헬퍼는 클로저로 처리)
+
+  exportWorkersSection: async (role) => {
+    const { currentCampId, currentWeekStart, workers, camps } = get();
     if (!currentCampId || !currentWeekStart) return;
+    const campName = camps.find((c) => c.id === currentCampId)?.name ?? 'camp';
+    const list = workers.filter((w) => w.campId === currentCampId && w.role === role);
+    const roleLabel = role === 'regular' ? '고정인원' : '백업인원';
+    await exportWorkersExcel(list, campName, currentWeekStart, roleLabel);
+  },
 
-    // 1) source roster 의 인원/라우트
-    const [srcWorkers, srcRoutes] = await Promise.all([
-      db.fetchWorkersByRoster(sourceRosterId),
-      db.fetchRoutesByRoster(sourceRosterId),
-    ]);
+  exportRoutesSection: async () => {
+    const { currentCampId, currentWeekStart, routes, camps } = get();
+    if (!currentCampId || !currentWeekStart) return;
+    const campName = camps.find((c) => c.id === currentCampId)?.name ?? 'camp';
+    await exportRoutesExcel(routes[currentCampId] ?? [], campName, currentWeekStart);
+  },
 
-    // 2) 현재 (camp, week) roster 확보 — state 대신 DB에서 직접 조회 (중복 생성 방지).
-    //    있으면 기존 인원/라우트 비우고, 없으면 새로 생성.
+  importWorkersSection: async (role, parsed) => {
+    const { currentCampId, currentWeekStart, camps } = get();
+    if (!currentCampId || !currentWeekStart) return;
     let roster = await db.fetchRoster(currentCampId, currentWeekStart);
     if (!roster) {
-      roster = await db.createRoster({
-        campId: currentCampId,
-        weekStart: currentWeekStart,
-        source: `copied_from:${sourceRosterId}`,
-      });
+      roster = await db.createRoster({ campId: currentCampId, weekStart: currentWeekStart, source: 'excel' });
     } else {
-      await Promise.all([
-        db.deleteWorkersByRoster(roster.id),
-        db.deleteRoutesByRoster(roster.id),
-      ]);
+      await db.deleteWorkersByRosterRole(roster.id, role);
     }
-
-    // 3) source 인원/라우트를 새 id로 복사
-    const copiedWorkers: Worker[] = srcWorkers.map((w) => ({
-      ...w,
+    const wave = camps.find((c) => c.id === currentCampId)?.wave ?? 'WAVE1';
+    const defaultRotations = ROTATIONS_BY_WAVE[wave] ?? [];
+    const newWorkers: Worker[] = parsed.map((pw) => ({
       id: `w_${++idCounter}`,
       weeklyRosterId: roster!.id,
       campId: currentCampId,
+      name: pw.name,
+      loginId: pw.loginId,
+      role,
+      assignedRoutes: pw.assignedRoutes,
+      rotations: pw.rotations.length > 0 ? pw.rotations : [...defaultRotations],
+      phone: pw.phone,
+      vehicle: pw.vehicle,
+      note: pw.note,
     }));
-    await Promise.all(copiedWorkers.map((w, i) => db.upsertWorker(w, i)));
-    await Promise.all(srcRoutes.map((r, i) =>
-      db.upsertRoute(roster!.id, currentCampId, r, i),
-    ));
-
-    // 4) 현재 (camp, week)로 새로고침
+    await Promise.all(newWorkers.map((w, i) => db.upsertWorker(w, i)));
     await get().loadCampWeek(currentCampId, currentWeekStart);
   },
 
-  // ─── 엑셀 백업/복구 ──────────────────────────
-
-  exportAllCamps: async () => {
-    const { camps, currentWeekStart } = get();
-    if (!currentWeekStart) return;
-
-    const out: RosterExcelCamp[] = [];
-    for (const camp of camps) {
-      const roster = await db.fetchRoster(camp.id, currentWeekStart);
-      let workers: Worker[] = [];
-      let routes: Route[] = [];
-      if (roster) {
-        [workers, routes] = await Promise.all([
-          db.fetchWorkersByRoster(roster.id),
-          db.fetchRoutesByRoster(roster.id),
-        ]);
-      }
-      out.push({
-        name: camp.name,
-        wave: camp.wave,
-        companyId: camp.companyId,
-        regulars: workers.filter((w) => w.role === 'regular'),
-        backups: workers.filter((w) => w.role === 'backup'),
-        routes,
-      });
+  importRoutesSection: async (parsed) => {
+    const { currentCampId, currentWeekStart } = get();
+    if (!currentCampId || !currentWeekStart) return;
+    let roster = await db.fetchRoster(currentCampId, currentWeekStart);
+    if (!roster) {
+      roster = await db.createRoster({ campId: currentCampId, weekStart: currentWeekStart, source: 'excel' });
+    } else {
+      await db.deleteRoutesByRoster(roster.id);
     }
-
-    await exportRosterExcel(out, currentWeekStart);
+    await Promise.all(parsed.map((r, i) =>
+      db.upsertRoute(roster!.id, currentCampId, { id: r.routeId, subRoutes: r.subRoutes }, i),
+    ));
+    await get().loadCampWeek(currentCampId, currentWeekStart);
   },
 
-  importAllCamps: async (parsed) => {
-    const { currentWeekStart, currentCampId } = get();
-    if (!currentWeekStart) return;
+  copyWorkersFromWeek: async (role, sourceRosterId) => {
+    const srcWorkers = (await db.fetchWorkersByRoster(sourceRosterId)).filter((w) => w.role === role);
+    await get().importWorkersSection(role, srcWorkers.map((w) => ({
+      name: w.name,
+      loginId: w.loginId,
+      assignedRoutes: w.assignedRoutes,
+      rotations: w.rotations,
+      phone: w.phone,
+      vehicle: w.vehicle,
+      note: w.note,
+    })));
+  },
 
-    for (const pc of parsed) {
-      // 1) 캠프 매칭 (이름) — 캠프는 복구 대상이 아님. 이미 있는 캠프만 채우고,
-      //    없는 캠프는 건너뜀 (캠프 생성/수정/삭제 전부 안 함).
-      const camp = get().camps.find((c) => c.name === pc.name);
-      if (!camp) continue;
-
-      // 2) 현재 주차 roster 확보 — 없으면 생성, 있으면 비우기
-      let roster = await db.fetchRoster(camp.id, currentWeekStart);
-      if (!roster) {
-        roster = await db.createRoster({ campId: camp.id, weekStart: currentWeekStart, source: 'excel' });
-      } else {
-        await Promise.all([
-          db.deleteWorkersByRoster(roster.id),
-          db.deleteRoutesByRoster(roster.id),
-        ]);
-      }
-
-      // 3) 인원 insert (회전 비어있으면 wave 기본값)
-      const defaultRotations = ROTATIONS_BY_WAVE[camp.wave] ?? [];
-      const makeWorker = (pw: ParsedRosterCamp['regulars'][number], role: WorkerRole): Worker => ({
-        id: `w_${++idCounter}`,
-        weeklyRosterId: roster!.id,
-        campId: camp!.id,
-        name: pw.name,
-        loginId: pw.loginId,
-        role,
-        assignedRoutes: pw.assignedRoutes,
-        rotations: pw.rotations.length > 0 ? pw.rotations : [...defaultRotations],
-        phone: pw.phone,
-        vehicle: pw.vehicle,
-        note: pw.note,
-      });
-      const newWorkers = [
-        ...pc.regulars.map((pw) => makeWorker(pw, 'regular')),
-        ...pc.backups.map((pw) => makeWorker(pw, 'backup')),
-      ];
-      await Promise.all(newWorkers.map((w, i) => db.upsertWorker(w, i)));
-
-      // 4) 라우트 insert
-      await Promise.all(pc.routes.map((r, i) =>
-        db.upsertRoute(roster!.id, camp!.id, { id: r.routeId, subRoutes: r.subRoutes }, i),
-      ));
-    }
-
-    // 5) 현재 보고 있는 캠프/주차 새로고침
-    if (currentCampId) {
-      await get().loadCampWeek(currentCampId, currentWeekStart);
-    }
+  copyRoutesFromWeek: async (sourceRosterId) => {
+    const srcRoutes = await db.fetchRoutesByRoster(sourceRosterId);
+    await get().importRoutesSection(srcRoutes.map((r) => ({ routeId: r.id, subRoutes: r.subRoutes })));
   },
 
   // ─── 조회 ────────────────────────────────────
