@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useScheduleStore } from '../../store/useScheduleStore';
 import { useWorkerStore } from '../../store/useWorkerStore';
 import { useHistoryStore } from '../../store/useHistoryStore';
+import type { ScheduleImportResult } from '../../utils/importScheduleExcel';
 import { markDirty } from '../../store/historyBridge';
 import { DAY_LABELS, COMPANIES } from '../../types';
 import type { Worker, CellStatus, CampLock } from '../../types';
@@ -71,6 +72,52 @@ export default function ScheduleCalendar() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const tableWrapRef = useRef<HTMLDivElement>(null);
+
+  // 엑셀 업로드(스케쥴 복원)
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const importFormatRef = useRef<'일반' | '어드민'>('일반');
+  const [importReport, setImportReport] = useState<ScheduleImportResult | null>(null);
+
+  function triggerImport(format: '일반' | '어드민') {
+    setShowExportMenu(false);
+    if (!canEdit) {
+      alert(!hasCampPermission
+        ? '이 캠프에 대한 편집 권한이 없습니다.'
+        : lockStatus === 'blocked'
+          ? `${blockedBy?.displayName ?? '다른 사용자'}님이 편집 중입니다.`
+          : '잠금 획득 전입니다. 잠시 후 다시 시도해주세요.');
+      return;
+    }
+    importFormatRef.current = format;
+    importFileRef.current?.click();
+  }
+
+  async function handleImportScheduleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const buffer = await file.arrayBuffer();
+      const { importScheduleExcel } = await import('../../utils/importScheduleExcel');
+      const workers = [...regulars, ...backups];
+      const res = await importScheduleExcel(buffer, importFormatRef.current, {
+        campId: store.selectedCampId,
+        weekDates: store.weekDates,
+        workers,
+      });
+      setImportReport(res);
+    } catch (err) {
+      console.error('엑셀 업로드 실패:', err);
+      alert(`엑셀 업로드 실패\n\n${err instanceof Error ? err.message : JSON.stringify(err)}`);
+    }
+  }
+
+  function applyImportReport() {
+    if (!importReport) return;
+    store.applyImportedCells(importReport.applicable);
+    setToast(`${importReport.appliedCount}건 반영됨 ✓ — 저장 버튼을 눌러 저장하세요`);
+    setImportReport(null);
+  }
 
   // 토스트 메시지
   const [toast, setToast] = useState<string | null>(null);
@@ -791,6 +838,13 @@ export default function ScheduleCalendar() {
                   &#x1F4CB; 어드민 양식
                 </button>
                 <hr className="export-divider" />
+                <button onClick={() => triggerImport('일반')}>
+                  &#x2B06; 일반 양식 업로드
+                </button>
+                <button onClick={() => triggerImport('어드민')}>
+                  &#x2B06; 어드민 양식 업로드
+                </button>
+                <hr className="export-divider" />
                 <button onClick={() => {
                   setShowExportMenu(false);
                   handleDownloadImage();
@@ -799,6 +853,13 @@ export default function ScheduleCalendar() {
                 </button>
               </div>
             )}
+            <input
+              ref={importFileRef}
+              type="file"
+              accept=".xlsx,.xls"
+              style={{ display: 'none' }}
+              onChange={handleImportScheduleFile}
+            />
           </div>
           <span className="toolbar-user" title={auth.user?.email ?? ''}>
             {auth.role === 'admin' ? '[관리자]' : '[뷰어]'} {toDisplayName(auth.user?.email ?? '')}
@@ -1034,6 +1095,41 @@ export default function ScheduleCalendar() {
           </div>
         );
       })()}
+
+      {/* 엑셀 업로드 검증 결과 */}
+      {importReport && (
+        <div className="roster-modal-overlay" onClick={() => setImportReport(null)}>
+          <div className="roster-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>엑셀 업로드 — {importReport.format} 양식</h3>
+            <p>
+              적용 가능: <strong>{importReport.appliedCount}</strong>건
+              {importReport.errors.length > 0 && <> / 적용 불가: <strong>{importReport.errors.length}</strong>건</>}
+            </p>
+            {importReport.errors.length > 0 && (
+              <div className="import-error-list">
+                {importReport.errors.map((er, i) => (
+                  <div key={i} className="import-error-row">
+                    <span className="import-error-line">{er.row}번째 줄</span> — {er.reason}
+                  </div>
+                ))}
+              </div>
+            )}
+            {importReport.appliedCount === 0 && importReport.errors.length === 0 && (
+              <div className="perm-empty">반영할 내용이 없습니다.</div>
+            )}
+            <div className="camp-add-actions">
+              <button
+                className="camp-save-btn"
+                disabled={importReport.appliedCount === 0}
+                onClick={applyImportReport}
+              >
+                적용 가능한 {importReport.appliedCount}건 반영
+              </button>
+              <button className="camp-cancel-btn" onClick={() => setImportReport(null)}>취소</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 토스트 */}
       {toast && <div className="toast-message">{toast}</div>}
