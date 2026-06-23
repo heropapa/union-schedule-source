@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Worker, WorkerRole, Route, Camp, WeeklyRoster } from '../types';
 import { ROTATIONS_BY_WAVE } from '../types';
-import { pushHistory } from './historyBridge';
+import { pushHistory, markDirty } from './historyBridge';
 import * as db from '../lib/db';
 import {
   exportWorkersExcel,
@@ -293,6 +293,7 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
     }));
     await Promise.all(newWorkers.map((w, i) => db.upsertWorker(w, i)));
     await get().loadCampWeek(currentCampId, currentWeekStart);
+    markDirty();
   },
 
   importRoutesSection: async (parsed) => {
@@ -308,6 +309,7 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
       db.upsertRoute(roster!.id, currentCampId, { id: r.routeId, subRoutes: r.subRoutes }, i),
     ));
     await get().loadCampWeek(currentCampId, currentWeekStart);
+    markDirty();
   },
 
   copyWorkersFromWeek: async (role, sourceRosterId) => {
@@ -335,6 +337,7 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
     if (!roster) return;
     await db.deleteWorkersByRosterRole(roster.id, role);
     await get().loadCampWeek(currentCampId, currentWeekStart);
+    markDirty();
   },
 
   clearRoutesSection: async () => {
@@ -344,6 +347,7 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
     if (!roster) return;
     await db.deleteRoutesByRoster(roster.id);
     await get().loadCampWeek(currentCampId, currentWeekStart);
+    markDirty();
   },
 
   // ─── 조회 ────────────────────────────────────
