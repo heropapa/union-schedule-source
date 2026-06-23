@@ -1055,3 +1055,19 @@
 }
 .sec-tool-btn:hover:not(:disabled) { background: #ececec; }
 .sec-tool-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── 캠프 권한 (없음/보기/편집) ── */
+.perm-user-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+}
+.perm-user-name { font-size: 13px; }
+.perm-level-select {
+  font-size: 12px;
+  padding: 2px 4px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
