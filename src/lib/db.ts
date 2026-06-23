@@ -362,28 +362,45 @@ export async function deleteCell(workerId: string, date: string): Promise<void> 
 
 // ─── Camp Locks (v1.1: 주차별) ──────────────────────────
 
+/** 현재 로그인 사용자의 표시 이름 (본인 profiles 행 — RLS 허용). 없으면 이메일 앞부분. */
+async function currentDisplayName(userId: string | undefined): Promise<string | null> {
+  if (!userId) return null;
+  const { data } = await supabase
+    .from('profiles')
+    .select('display_name, email')
+    .eq('id', userId)
+    .maybeSingle();
+  if (!data) return null;
+  return data.display_name || (data.email ? String(data.email).split('@')[0] : null);
+}
+
 export async function acquireLock(
   campId: string,
   weekStart: string,
   sessionId: string,
 ): Promise<{ success: boolean; lock?: CampLock }> {
-  // 기존 잠금 조회
+  // 기존 잠금 조회 (profiles 조인 없이 — 이름은 잠금 행에 직접 저장된 값을 사용)
   const { data: existing } = await supabase
     .from('camp_locks')
-    .select('*, profiles!camp_locks_locked_by_fkey(display_name)')
+    .select('*')
     .eq('camp_id', campId)
     .eq('week_start', weekStart)
     .maybeSingle();
 
+  const userId = (await supabase.auth.getUser()).data.user?.id;
+
   if (existing) {
     const heartbeatAge = Date.now() - new Date(existing.heartbeat).getTime();
     if (heartbeatAge < 45000) {
-      const userId = (await supabase.auth.getUser()).data.user?.id;
       if (existing.locked_by === userId) {
-        // 내 잠금 — heartbeat 갱신
+        // 내 잠금 — heartbeat 갱신 (이름도 최신화)
         await supabase
           .from('camp_locks')
-          .update({ heartbeat: new Date().toISOString(), session_id: sessionId })
+          .update({
+            heartbeat: new Date().toISOString(),
+            session_id: sessionId,
+            locked_by_name: await currentDisplayName(userId),
+          })
           .eq('camp_id', campId)
           .eq('week_start', weekStart);
         return { success: true };
@@ -397,7 +414,7 @@ export async function acquireLock(
           lockedAt: existing.locked_at,
           heartbeat: existing.heartbeat,
           sessionId: existing.session_id,
-          displayName: existing.profiles?.display_name,
+          displayName: existing.locked_by_name ?? undefined,
         },
       };
     }
@@ -409,14 +426,14 @@ export async function acquireLock(
       .eq('week_start', weekStart);
   }
 
-  // 새 잠금
-  const userId = (await supabase.auth.getUser()).data.user?.id;
+  // 새 잠금 (편집자 이름을 행에 함께 저장)
   const { error } = await supabase.from('camp_locks').insert({
     camp_id: campId,
     week_start: weekStart,
     locked_by: userId,
     session_id: sessionId,
     heartbeat: new Date().toISOString(),
+    locked_by_name: await currentDisplayName(userId),
   });
   if (error) {
     // race — 다른 사용자가 잡음
