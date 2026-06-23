@@ -1071,3 +1071,6 @@
   border: 1px solid #ccc;
   border-radius: 4px;
 }
+
+.perm-checks { display: inline-flex; gap: 10px; }
+.perm-check { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; cursor: pointer; }
