@@ -24,12 +24,16 @@ const MAX_HISTORY = 50;
 interface HistoryState {
   past: Snapshot[];
   future: Snapshot[];
+  /** 저장되지 않은 변경이 있는지 (저장 버튼 활성화 여부) */
+  dirty: boolean;
 
   pushSnapshot: () => void;
   undo: () => void;
   redo: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
+  /** 변경 표시 / 저장·로드 후 초기화 */
+  setDirty: (v: boolean) => void;
 }
 
 function captureSnapshot(): Snapshot {
@@ -57,12 +61,14 @@ function restoreSnapshot(snap: Snapshot) {
 export const useHistoryStore = create<HistoryState>()((set, get) => ({
   past: [],
   future: [],
+  dirty: false,
 
   pushSnapshot: () => {
     const snap = captureSnapshot();
     set((state) => ({
       past: [...state.past.slice(-(MAX_HISTORY - 1)), snap],
       future: [],
+      dirty: true,
     }));
   },
 
@@ -75,6 +81,7 @@ export const useHistoryStore = create<HistoryState>()((set, get) => ({
     set((state) => ({
       past: state.past.slice(0, -1),
       future: [current, ...state.future],
+      dirty: true,
     }));
   },
 
@@ -87,13 +94,15 @@ export const useHistoryStore = create<HistoryState>()((set, get) => ({
     set((state) => ({
       past: [...state.past, current],
       future: state.future.slice(1),
+      dirty: true,
     }));
   },
 
   canUndo: () => get().past.length > 0,
   canRedo: () => get().future.length > 0,
+  setDirty: (v) => set({ dirty: v }),
 }));
 
 // Register bridge so stores can call pushHistory() without importing this file
 registerPushSnapshot(() => useHistoryStore.getState().pushSnapshot());
-registerMarkDirty(() => {});  // DB 자동 저장 — dirty 추적 불필요
+registerMarkDirty(() => useHistoryStore.getState().setDirty(true));
