@@ -299,7 +299,8 @@ export default function Sidebar() {
       });
     } catch (err) {
       console.error('권한 변경 실패:', err);
-      alert('권한 변경에 실패했습니다. v1.6 권한 SQL이 적용됐는지 확인하세요.');
+      const msg = err instanceof Error ? err.message : JSON.stringify(err);
+      alert('권한 변경에 실패했습니다.\n\n' + msg + '\n\n(v1.6 권한 SQL이 적용됐는지 확인하세요.)');
     }
   };
   const [selectedCompanyId, setSelectedCompanyId] = useState('union');
