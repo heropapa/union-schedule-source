@@ -254,7 +254,6 @@ export default function Sidebar() {
   }
 
   // ── 권한 관리 (admin 전용) ──
-  const [permDropdownCamp, setPermDropdownCamp] = useState<string | null>(null);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [permissions, setPermissions] = useState<CampPermission[]>([]);
 
@@ -671,6 +670,50 @@ export default function Sidebar() {
                     <option value="WAVE1">WAVE1 (야간)</option>
                     <option value="WAVE2">WAVE2 (주간)</option>
                   </select>
+
+                  {/* 게시 + 캠프 권한 (우클릭 한 곳에서 관리) */}
+                  <label className="perm-publish-row">
+                    <input
+                      type="checkbox"
+                      checked={publishedCamps.has(camp.id)}
+                      onChange={() => togglePublish(camp.id)}
+                    />
+                    <span>게시판에 공개</span>
+                  </label>
+                  <div className="perm-dropdown-title">캠프 권한 (보기 / 편집)</div>
+                  <div className="perm-user-list">
+                    {allUsers.map((user) => {
+                      const p = permissions.find(pp => pp.userId === user.id && pp.campId === camp.id);
+                      const level: 'none' | 'read' | 'write' = p ? p.level : 'none';
+                      const canView = level === 'read' || level === 'write';
+                      const canEdit = level === 'write';
+                      return (
+                        <div key={user.id} className="perm-user-row">
+                          <span className="perm-user-name">{user.displayName}</span>
+                          <span className="perm-checks">
+                            <label className="perm-check">
+                              <input
+                                type="checkbox"
+                                checked={canView}
+                                onChange={() => setUserPerm(user.id, camp.id, canView ? 'none' : 'read')}
+                              />
+                              보기
+                            </label>
+                            <label className="perm-check">
+                              <input
+                                type="checkbox"
+                                checked={canEdit}
+                                onChange={() => setUserPerm(user.id, camp.id, canEdit ? 'read' : 'write')}
+                              />
+                              편집
+                            </label>
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {allUsers.length === 0 && <div className="perm-empty">등록된 사용자 없음</div>}
+
                   <div className="camp-add-actions">
                     <button
                       className="camp-save-btn"
@@ -695,27 +738,15 @@ export default function Sidebar() {
                 </div>
               ) : (
                 <>
-                  {isAdmin && (
-                    <button
-                      className={`camp-perm-btn ${permDropdownCamp === camp.id ? 'active' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPermDropdownCamp(permDropdownCamp === camp.id ? null : camp.id);
-                      }}
-                      title="수정 권한 관리"
-                    >
-                      {permDropdownCamp === camp.id ? '▾' : '▸'}
-                    </button>
-                  )}
                   <button
                     className={`camp-btn ${selectedCampId === camp.id ? 'active' : ''}`}
                     onClick={() => selectCamp(camp.id)}
                     onContextMenu={(e) => {
                       e.preventDefault();
-                      if (!isAdmin) return;   // 캠프 편집은 admin 전용
+                      if (!isAdmin) return;   // 캠프 편집/권한은 admin 전용
                       setEditingCamp({ id: camp.id, name: camp.name, wave: camp.wave ?? 'WAVE1' });
                     }}
-                    title={isAdmin ? '우클릭: 캠프 편집' : undefined}
+                    title={isAdmin ? '우클릭: 캠프 편집·권한' : undefined}
                   >
                     <span className="camp-dot" style={{ background: camp.color || '#888' }} />
                     {camp.name}
@@ -743,53 +774,6 @@ export default function Sidebar() {
                 >
                   &times;
                 </button>
-              )}
-              {/* 권한 드롭다운 */}
-              {permDropdownCamp === camp.id && isAdmin && (
-                <div className="perm-dropdown" onClick={(e) => e.stopPropagation()}>
-                  <label className="perm-publish-row">
-                    <input
-                      type="checkbox"
-                      checked={publishedCamps.has(camp.id)}
-                      onChange={() => togglePublish(camp.id)}
-                    />
-                    <span>게시판에 공개</span>
-                  </label>
-                  <div className="perm-dropdown-title">캠프 권한 (보기 / 편집)</div>
-                  <div className="perm-user-list">
-                  {allUsers.map((user) => {
-                    const p = permissions.find(pp => pp.userId === user.id && pp.campId === camp.id);
-                    const level: 'none' | 'read' | 'write' = p ? p.level : 'none';
-                    const canView = level === 'read' || level === 'write';
-                    const canEdit = level === 'write';
-                    return (
-                      <div key={user.id} className="perm-user-row">
-                        <span className="perm-user-name">{user.displayName}</span>
-                        <span className="perm-checks">
-                          <label className="perm-check">
-                            <input
-                              type="checkbox"
-                              checked={canView}
-                              onChange={() => setUserPerm(user.id, camp.id, canView ? 'none' : 'read')}
-                            />
-                            보기
-                          </label>
-                          <label className="perm-check">
-                            <input
-                              type="checkbox"
-                              checked={canEdit}
-                              // 편집 켜면 보기도 자동 포함(write), 끄면 보기만(read)
-                              onChange={() => setUserPerm(user.id, camp.id, canEdit ? 'read' : 'write')}
-                            />
-                            편집
-                          </label>
-                        </span>
-                      </div>
-                    );
-                  })}
-                  </div>
-                  {allUsers.length === 0 && <div className="perm-empty">등록된 사용자 없음</div>}
-                </div>
               )}
             </div>
           ))}
