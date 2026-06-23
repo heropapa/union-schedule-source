@@ -869,3 +869,13 @@
   font-weight: 700;
   white-space: nowrap;
 }
+
+/* 캠프 미선택 시 표 영역 안내 */
+.no-camp-msg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  color: #999;
+  font-size: 1.1rem;
+}

@@ -739,15 +739,6 @@ export default function ScheduleCalendar() {
     .filter((x) => x.dupes.length > 0);
   const hasDuplicates = duplicatesByDate.length > 0;
 
-  // 선택된 캠프가 없으면 안내 표시
-  if (!store.selectedCampId) {
-    return (
-      <div className="schedule-grid" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999', fontSize: '1.1rem' }}>
-        왼쪽에서 캠프를 선택하세요
-      </div>
-    );
-  }
-
   return (
     <div className="schedule-grid">
       {/* 헤더 */}
@@ -795,10 +786,11 @@ export default function ScheduleCalendar() {
               className="toolbar-btn export-btn"
               onClick={() => setShowExportMenu((v) => !v)}
               title="엑셀 다운로드"
+              disabled={!store.selectedCampId}
             >
               &#x1F4E5; 엑셀 &#x25BE;
             </button>
-            {showExportMenu && (
+            {showExportMenu && store.selectedCampId && (
               <div className="export-dropdown-menu">
                 <button onClick={async () => {
                   setShowExportMenu(false);
@@ -914,7 +906,8 @@ export default function ScheduleCalendar() {
         </div>
       )}
 
-      {/* 테이블 */}
+      {/* 테이블 (캠프 선택 시에만; 미선택 시 안내) */}
+      {store.selectedCampId ? (
       <div className="grid-table-wrap" ref={tableWrapRef}>
         <table className="grid-table">
           <thead>
@@ -1077,6 +1070,9 @@ export default function ScheduleCalendar() {
           </tbody>
         </table>
       </div>
+      ) : (
+        <div className="no-camp-msg">왼쪽에서 캠프를 선택하세요</div>
+      )}
 
       {/* 위반 안내 */}
       {(() => {
