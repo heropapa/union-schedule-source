@@ -755,23 +755,35 @@ export default function Sidebar() {
                     />
                     <span>게시판에 공개</span>
                   </label>
-                  <div className="perm-dropdown-title">캠프 권한 (없음 / 보기 / 편집)</div>
+                  <div className="perm-dropdown-title">캠프 권한 (보기 / 편집)</div>
                   <div className="perm-user-list">
                   {allUsers.map((user) => {
                     const p = permissions.find(pp => pp.userId === user.id && pp.campId === camp.id);
                     const level: 'none' | 'read' | 'write' = p ? p.level : 'none';
+                    const canView = level === 'read' || level === 'write';
+                    const canEdit = level === 'write';
                     return (
                       <div key={user.id} className="perm-user-row">
                         <span className="perm-user-name">{user.displayName}</span>
-                        <select
-                          className="perm-level-select"
-                          value={level}
-                          onChange={(e) => setUserPerm(user.id, camp.id, e.target.value as 'none' | 'read' | 'write')}
-                        >
-                          <option value="none">없음</option>
-                          <option value="read">보기</option>
-                          <option value="write">편집</option>
-                        </select>
+                        <span className="perm-checks">
+                          <label className="perm-check">
+                            <input
+                              type="checkbox"
+                              checked={canView}
+                              onChange={() => setUserPerm(user.id, camp.id, canView ? 'none' : 'read')}
+                            />
+                            보기
+                          </label>
+                          <label className="perm-check">
+                            <input
+                              type="checkbox"
+                              checked={canEdit}
+                              // 편집 켜면 보기도 자동 포함(write), 끄면 보기만(read)
+                              onChange={() => setUserPerm(user.id, camp.id, canEdit ? 'read' : 'write')}
+                            />
+                            편집
+                          </label>
+                        </span>
                       </div>
                     );
                   })}
@@ -917,15 +929,25 @@ export default function Sidebar() {
                       placeholder="아이디"
                     />
                   </label>
-                  <label>라우트
-                    <input
-                      className="add-input"
-                      value={editingWorker.routes}
-                      onChange={(e) => setEditingWorker({ ...editingWorker, routes: e.target.value })}
-                      onKeyDown={(e) => { if (e.key === 'Escape') setEditingWorker(null); }}
-                      placeholder="701A, 701B"
-                    />
-                  </label>
+                  <label>담당 라우트</label>
+                  <div className="rotation-checkboxes">
+                    {campRoutes.flatMap((r) => r.subRoutes).map((sr) => (
+                      <label key={sr} className="rotation-label">
+                        <input
+                          type="checkbox"
+                          checked={editingWorker.routes.split(',').map(s => s.trim()).filter(Boolean).includes(sr)}
+                          onChange={() => {
+                            const current = editingWorker.routes.split(',').map(s => s.trim()).filter(Boolean);
+                            const next = current.includes(sr)
+                              ? current.filter(r => r !== sr)
+                              : [...current, sr];
+                            setEditingWorker({ ...editingWorker, routes: next.join(', ') });
+                          }}
+                        />
+                        {sr}
+                      </label>
+                    ))}
+                  </div>
                   <div className="rotation-checkboxes">
                     {allRotations.map((rot) => (
                       <label key={rot} className="rotation-label">
