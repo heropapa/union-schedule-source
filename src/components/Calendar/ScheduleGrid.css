@@ -847,3 +847,25 @@
 
 .import-apply-btn:hover { background: #245d8e; }
 .import-apply-btn:disabled { background: #ccc; cursor: not-allowed; }
+
+/* ── 엑셀 업로드 검증 결과 ── */
+.import-error-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #f0c0c0;
+  background: #fff6f6;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+}
+.import-error-row {
+  font-size: 13px;
+  padding: 3px 0;
+  border-bottom: 1px solid #f3e0e0;
+  color: #8b2b2b;
+}
+.import-error-row:last-child { border-bottom: none; }
+.import-error-line {
+  font-weight: 700;
+  white-space: nowrap;
+}

@@ -42,6 +42,8 @@ interface ScheduleState {
   // 셀 조작
   setCell: (workerId: string, date: string, status: CellStatus, cellRoutes: SubRoute[]) => void;
   clearCell: (workerId: string, date: string) => void;
+  /** 엑셀 업로드 등으로 여러 셀을 한 번에 반영 (undo 1회로 묶임) */
+  applyImportedCells: (cells: ScheduleCell[]) => void;
 
   // 셀 조회 (저장된 값만)
   getCell: (workerId: string, date: string) => ScheduleCell | undefined;
@@ -129,6 +131,17 @@ export const useScheduleStore = create<ScheduleState>()((set, get) => ({
       return { cells: next };
     });
     // DB 저장은 저장 버튼 클릭 시에만
+  },
+
+  applyImportedCells: (cells) => {
+    if (!cells.length) return;
+    pushHistory();
+    set((state) => {
+      const next = { ...state.cells };
+      for (const c of cells) next[cellKey(c.workerId, c.date)] = c;
+      return { cells: next };
+    });
+    // DB 저장은 저장 버튼 클릭 시에만 (사용자가 검토 후 저장)
   },
 
   getCell: (workerId, date) => {
