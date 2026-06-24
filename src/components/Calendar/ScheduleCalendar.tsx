@@ -57,9 +57,11 @@ export default function ScheduleCalendar() {
   // ── 캠프 잠금 (멀티유저 동시 편집 방지) ──
   // sessionId: 같은 사용자의 다른 탭 구분용
   const sessionIdRef = useRef<string>(crypto.randomUUID());
-  type LockStatus = 'idle' | 'acquiring' | 'held' | 'blocked' | 'error' | 'no-permission';
+  type LockStatus = 'idle' | 'acquiring' | 'held' | 'blocked' | 'error' | 'no-permission' | 'viewing';
   const [lockStatus, setLockStatus] = useState<LockStatus>('idle');
   const [blockedBy, setBlockedBy] = useState<CampLock | null>(null);
+  // 수동 잠금: 기본은 보기 전용. 사용자가 '편집 시작'을 눌러야 잠금을 획득.
+  const [editMode, setEditMode] = useState(false);
   // viewer 권한자가 권한 없는 캠프를 봐도 lock을 잡지 않게 하고,
   // canEdit으로 셀/우클릭/저장 가드까지 한 번에 막는다.
   const hasCampPermission = store.selectedCampId ? auth.canEditCamp(store.selectedCampId) : false;
@@ -153,6 +155,8 @@ export default function ScheduleCalendar() {
         reason = '이 캠프에 대한 편집 권한이 없습니다. 관리자에게 권한을 요청하세요.';
       } else if (lockStatus === 'blocked') {
         reason = `편집 권한 없음: ${blockedBy?.displayName ?? '다른 사용자'}님이 편집 중입니다.`;
+      } else if (lockStatus === 'viewing') {
+        reason = "보기 전용입니다. 수정하려면 상단 '🔒 편집 시작'을 먼저 누르세요.";
       } else {
         reason = '잠금 획득 전입니다. 잠시 후 다시 시도해주세요.';
       }
@@ -285,6 +289,12 @@ export default function ScheduleCalendar() {
       setBlockedBy(null);
       return;
     }
+    // 편집 모드가 아니면 잠금을 잡지 않음 (보기 전용) — 남들이 편집 가능
+    if (!editMode) {
+      setLockStatus('viewing');
+      setBlockedBy(null);
+      return;
+    }
 
     let cancelled = false;
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -328,7 +338,12 @@ export default function ScheduleCalendar() {
       window.removeEventListener('beforeunload', release);
       release();
     };
-  }, [store.selectedCampId, weekStartStr, hasCampPermission]);
+  }, [store.selectedCampId, weekStartStr, hasCampPermission, editMode]);
+
+  // 캠프/주차가 바뀌면 편집 모드 해제 (새 캠프는 보기 전용부터)
+  useEffect(() => {
+    setEditMode(false);
+  }, [store.selectedCampId, weekStartStr]);
 
   // blocked 상태에서 30초마다 잠금 재시도 (상대방이 종료했을 수 있음)
   useEffect(() => {
@@ -752,6 +767,27 @@ export default function ScheduleCalendar() {
         </div>
         <h2 className="week-label">{weekLabel}</h2>
         <div className="grid-toolbar">
+          {store.selectedCampId && hasCampPermission && (
+            <button
+              className="toolbar-btn lock-toggle-btn"
+              onClick={() => {
+                if (editMode && history.dirty && !confirm('저장하지 않은 변경이 있습니다. 편집을 종료할까요?')) return;
+                setEditMode(v => !v);
+              }}
+              title={editMode ? '편집 종료(잠금 해제)' : '편집 시작(잠금 획득)'}
+              style={{
+                background: editMode ? '#d5e8d4' : '#fff4e5',
+                border: `1px solid ${editMode ? '#82b366' : '#f0c075'}`,
+                fontWeight: 600,
+              }}
+            >
+              {editMode
+                ? (lockStatus === 'blocked'
+                    ? `🔒 ${blockedBy?.displayName ?? '다른 사용자'} 편집 중`
+                    : '🔓 편집 중 (클릭=종료)')
+                : '🔒 편집 시작'}
+            </button>
+          )}
           <button
             className="toolbar-btn undo-btn"
             onClick={history.undo}
@@ -909,6 +945,7 @@ export default function ScheduleCalendar() {
           )}
           {lockStatus === 'error' && '⚠ 잠금 시스템 오류 — 페이지를 새로고침 해주세요.'}
           {lockStatus === 'idle' && '캠프를 선택해주세요.'}
+          {lockStatus === 'viewing' && "👁 보기 전용입니다. 수정하려면 상단 '🔒 편집 시작'을 누르세요."}
           {lockStatus === 'no-permission' && '👁 이 캠프는 보기 전용입니다. 편집 권한은 관리자에게 요청하세요.'}
         </div>
       )}
