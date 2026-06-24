@@ -101,22 +101,44 @@ async function parseGeneral(
   return { applicable, errors, appliedCount: applicable.length, format: '일반' };
 }
 
-/** 어드민 양식 파싱 — 기존 parseAdminExcel + matchImportRows 재사용 */
+/** 어드민 양식 파싱 — 기존 parseAdminExcel + matchImportRows 재사용 + 안전장치 */
 async function parseAdmin(
   buffer: ArrayBuffer,
   campId: string,
+  campName: string,
+  weekDates: string[],
   workers: Worker[],
 ): Promise<ScheduleImportResult> {
   const rows = parseAdminExcel(buffer);
   const result = matchImportRows(rows, workers, campId);
 
-  const applicable: ScheduleCell[] = result.matched.map((m) => ({
-    workerId: m.worker.id,
-    date: m.row.date,
-    status: (m.row.status === '휴무' ? 'off' : 'work') as CellStatus,
-    routes: m.row.status === '휴무' ? [] : m.row.routes,
-  }));
+  // 안전장치 1: 파일 캠프명이 현재 캠프와 다르면 전체 거부 (다른 캠프 오적용 방지)
+  if (result.campName && campName && result.campName !== campName) {
+    return {
+      applicable: [],
+      errors: [{ row: 1, reason: `파일 캠프(${result.campName})가 현재 캠프(${campName})와 다릅니다. 해당 캠프를 선택 후 올려주세요.` }],
+      appliedCount: 0,
+      format: '어드민',
+    };
+  }
+
+  const weekSet = new Set(weekDates);
+  const applicable: ScheduleCell[] = [];
   const errors: ImportError[] = result.mismatched.map((mm) => ({ row: mm.row.rowNum, reason: mm.reason }));
+
+  for (const m of result.matched) {
+    // 안전장치 2: 현재 주차 밖 날짜는 무시 + 보고 (다른 주에 조용히 써지는 것 방지)
+    if (!weekSet.has(m.row.date)) {
+      errors.push({ row: m.row.rowNum, reason: `현재 주차(${weekDates[0]}~) 밖 날짜 ${m.row.date} — 무시됨` });
+      continue;
+    }
+    applicable.push({
+      workerId: m.worker.id,
+      date: m.row.date,
+      status: (m.row.status === '휴무' ? 'off' : 'work') as CellStatus,
+      routes: m.row.status === '휴무' ? [] : m.row.routes,
+    });
+  }
 
   return { applicable, errors, appliedCount: applicable.length, format: '어드민' };
 }
@@ -125,8 +147,8 @@ async function parseAdmin(
 export async function importScheduleExcel(
   buffer: ArrayBuffer,
   format: '일반' | '어드민',
-  ctx: { campId: string; weekDates: string[]; workers: Worker[] },
+  ctx: { campId: string; campName: string; weekDates: string[]; workers: Worker[] },
 ): Promise<ScheduleImportResult> {
-  if (format === '어드민') return parseAdmin(buffer, ctx.campId, ctx.workers);
+  if (format === '어드민') return parseAdmin(buffer, ctx.campId, ctx.campName, ctx.weekDates, ctx.workers);
   return parseGeneral(buffer, ctx.weekDates, ctx.workers);
 }
