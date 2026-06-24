@@ -53,6 +53,27 @@ function MainApp() {
     loadData();
   }, [session]);
 
+  // 10분 미사용 시 자동 로그아웃
+  useEffect(() => {
+    if (!session) return;
+    const IDLE_MS = 10 * 60 * 1000;
+    let timer: ReturnType<typeof setTimeout>;
+    const reset = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        useAuthStore.getState().logout();
+        alert('10분 동안 사용이 없어 자동 로그아웃되었습니다.');
+      }, IDLE_MS);
+    };
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
+    events.forEach((e) => window.addEventListener(e, reset, { passive: true }));
+    reset();
+    return () => {
+      clearTimeout(timer);
+      events.forEach((e) => window.removeEventListener(e, reset));
+    };
+  }, [session]);
+
   if (loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: '#888' }}>
