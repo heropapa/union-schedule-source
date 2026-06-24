@@ -104,8 +104,10 @@ export default function ScheduleCalendar() {
       const buffer = await file.arrayBuffer();
       const { importScheduleExcel } = await import('../../utils/importScheduleExcel');
       const workers = [...regulars, ...backups];
+      const campName = camps.find((c) => c.id === store.selectedCampId)?.name ?? store.selectedCampId;
       const res = await importScheduleExcel(buffer, importFormatRef.current, {
         campId: store.selectedCampId,
+        campName,
         weekDates: store.weekDates,
         workers,
       });
