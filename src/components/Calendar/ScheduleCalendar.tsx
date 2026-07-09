@@ -67,6 +67,12 @@ export default function ScheduleCalendar() {
   const hasCampPermission = store.selectedCampId ? auth.canEditCamp(store.selectedCampId) : false;
   const canEdit = lockStatus === 'held' && hasCampPermission;
 
+  // 잠금/편집 가능 여부를 스토어에 공유 → 사이드바 편집도 같은 게이트를 따름
+  useEffect(() => {
+    store.setEditUnlocked(canEdit);
+  }, [canEdit, store]);
+  useEffect(() => () => useScheduleStore.getState().setEditUnlocked(false), []);
+
   const weekLabel = format(store.weekStart, 'yyyy년 M월 d일', { locale: ko }) + ' 주';
 
   // 인라인 편집 상태
