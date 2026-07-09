@@ -118,6 +118,7 @@ function sourceLabel(source: string): string {
 
 export default function Sidebar() {
   const { selectedCampId, setcamp, loadCells } = useScheduleStore();
+  const editUnlocked = useScheduleStore((s) => s.editUnlocked);
   const store = useWorkerStore();
 
   // 캠프 선택 — setcamp가 내부적으로 loadCampWeek 트리거.
@@ -133,13 +134,22 @@ export default function Sidebar() {
 
   const auth = useAuthStore();
   const isAdmin = auth.isAdmin();
-  const canEditSelectedCamp = selectedCampId ? auth.canEditCamp(selectedCampId) : false;
-  /** 선택된 캠프에 대한 편집 권한이 있을 때만 mutation 실행. 없으면 1회 알림. */
-  function withCampPermission(action: () => void) {
-    if (!canEditSelectedCamp) {
+  // 사이드바 편집은 (캠프 편집 권한) + (스케줄 화면 '편집 시작' 잠금) 둘 다 필요
+  const hasCampWritePerm = selectedCampId ? auth.canEditCamp(selectedCampId) : false;
+  /** 편집 가능(권한 + 편집 시작 잠금)일 때만 실행. 아니면 사유 알림. */
+  function requireEdit(): boolean {
+    if (!hasCampWritePerm) {
       alert('이 캠프에 대한 편집 권한이 없습니다. 관리자에게 권한을 요청하세요.');
-      return;
+      return false;
     }
+    if (!editUnlocked) {
+      alert("편집하려면 스케줄 화면 상단의 '🔒 편집 시작'을 먼저 누르세요.");
+      return false;
+    }
+    return true;
+  }
+  function withCampPermission(action: () => void) {
+    if (!requireEdit()) return;
     action();
   }
 
@@ -166,7 +176,7 @@ export default function Sidebar() {
   }
 
   function triggerUpload(section: Section) {
-    if (!canEditSelectedCamp) { alert('이 캠프에 대한 편집 권한이 없습니다.'); return; }
+    if (!requireEdit()) return;
     uploadTargetRef.current = section;
     fileInputRef.current?.click();
   }
@@ -198,7 +208,7 @@ export default function Sidebar() {
 
   async function openWeekLoad(section: Section) {
     if (!selectedCampId) return;
-    if (!canEditSelectedCamp) { alert('이 캠프에 대한 편집 권한이 없습니다.'); return; }
+    if (!requireEdit()) return;
     try {
       const rosters = await db.listRostersByCamp(selectedCampId);
       const current = useWorkerStore.getState().currentWeekStart;
@@ -227,7 +237,7 @@ export default function Sidebar() {
   }
 
   async function clearSection(section: Section) {
-    if (!canEditSelectedCamp) { alert('이 캠프에 대한 편집 권한이 없습니다.'); return; }
+    if (!requireEdit()) return;
     if (!confirm(`현재 주차의 ${sectionLabel(section)}을(를) 모두 비우시겠습니까?`)) return;
     setBusy(true);
     try {

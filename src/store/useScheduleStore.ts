@@ -28,6 +28,9 @@ interface ScheduleState {
   selectedCampId: string;
   weekStart: Date;
   weekDates: string[];
+  /** 현재 캠프·주차에 대해 편집 잠금을 잡고 편집 가능한 상태인지 (사이드바 편집 게이트 공유) */
+  editUnlocked: boolean;
+  setEditUnlocked: (v: boolean) => void;
 
   // DB 로드
   loadCells: (campId: string, dateRange?: { start: string; end: string }) => Promise<void>;
@@ -72,6 +75,8 @@ export const useScheduleStore = create<ScheduleState>()((set, get) => ({
   selectedCampId: '',
   weekStart: initialWeekStart,
   weekDates: getWeekDates(initialWeekStart),
+  editUnlocked: false,
+  setEditUnlocked: (v) => set({ editUnlocked: v }),
 
   loadCells: async (campId, dateRange) => {
     const cells = await db.fetchCellsByCamp(campId, dateRange);
