@@ -62,6 +62,7 @@ export default function ScheduleCalendar() {
   const [blockedBy, setBlockedBy] = useState<CampLock | null>(null);
   // 수동 잠금: 기본은 보기 전용. 사용자가 '편집 시작'을 눌러야 잠금을 획득.
   const [editMode, setEditMode] = useState(false);
+  const [exitPrompt, setExitPrompt] = useState(false);  // 저장 안 한 변경 있는 채로 편집 종료 시
   // viewer 권한자가 권한 없는 캠프를 봐도 lock을 잡지 않게 하고,
   // canEdit으로 셀/우클릭/저장 가드까지 한 번에 막는다.
   const hasCampPermission = store.selectedCampId ? auth.canEditCamp(store.selectedCampId) : false;
@@ -217,6 +218,30 @@ export default function ScheduleCalendar() {
     setSaving(false);
     setToast('저장을 취소했습니다. 변경 내용은 남아 있어요 — 다시 저장해보세요.');
   }, []);
+
+  // 편집 종료 시 선택지: 저장 후 종료 / 저장 안 하고 종료 / 취소
+  async function exitSaveThenClose() {
+    setExitPrompt(false);
+    await handleSave();
+    // 저장 성공(dirty=false)일 때만 종료. 실패하면 편집 유지.
+    if (!useHistoryStore.getState().dirty) setEditMode(false);
+  }
+  async function exitDiscardChanges() {
+    setExitPrompt(false);
+    const campId = useScheduleStore.getState().selectedCampId;
+    const wk = format(useScheduleStore.getState().weekStart, 'yyyy-MM-dd');
+    try {
+      // DB 상태로 되돌림 (로컬 미저장 변경 폐기)
+      useScheduleStore.setState({ cells: {} });
+      await useWorkerStore.getState().loadCampWeek(campId, wk);
+      await useScheduleStore.getState().loadCells(campId);
+    } catch (e) {
+      console.error('되돌리기 로드 실패:', e);
+    }
+    useHistoryStore.getState().setDirty(false);
+    setEditMode(false);
+    setToast('변경 내용을 취소하고 편집을 종료했습니다.');
+  }
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -796,8 +821,9 @@ export default function ScheduleCalendar() {
             <button
               className="toolbar-btn lock-toggle-btn"
               onClick={() => {
-                if (editMode && history.dirty && !confirm('저장하지 않은 변경이 있습니다. 편집을 종료할까요?')) return;
-                setEditMode(v => !v);
+                if (!editMode) { setEditMode(true); return; }
+                if (history.dirty) { setExitPrompt(true); return; }  // 저장 안 한 변경 있으면 물어봄
+                setEditMode(false);
               }}
               title={editMode ? '편집 종료(잠금 해제)' : '편집 시작(잠금 획득)'}
               style={{
@@ -1191,6 +1217,22 @@ export default function ScheduleCalendar() {
                 적용 가능한 {importReport.appliedCount}건 반영
               </button>
               <button className="camp-cancel-btn" onClick={() => setImportReport(null)}>취소</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 편집 종료 — 저장 안 한 변경 처리 */}
+      {exitPrompt && (
+        <div className="roster-modal-overlay" onClick={() => setExitPrompt(false)}>
+          <div className="roster-modal" onClick={(e) => e.stopPropagation()} style={{ width: 'min(380px, 92vw)' }}>
+            <h3>편집 종료</h3>
+            <p>저장하지 않은 변경이 있습니다. 어떻게 할까요?<br/>
+              <span style={{ color: '#b3261e' }}>'저장 안 하고 종료'하면 방금 변경한 내용이 사라집니다.</span></p>
+            <div className="camp-add-actions" style={{ flexDirection: 'column', gap: 8 }}>
+              <button className="camp-save-btn" onClick={exitSaveThenClose}>💾 저장 후 종료</button>
+              <button className="camp-cancel-btn" onClick={exitDiscardChanges}>🗑 저장 안 하고 종료</button>
+              <button className="camp-cancel-btn" onClick={() => setExitPrompt(false)}>↩ 취소 (계속 편집)</button>
             </div>
           </div>
         </div>
