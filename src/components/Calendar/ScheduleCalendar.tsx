@@ -184,7 +184,17 @@ export default function ScheduleCalendar() {
         alert('이번 주차 roster가 없습니다. 먼저 인원을 추가해 roster를 만들어주세요.');
         return;
       }
-      const workers = ws.workers.filter(w => w.campId === campId);
+      // 현재 사이드바 표시 순서대로 정렬 → sort_order로 확정 저장 (불러오면 같은 순서)
+      const orderBy = (list: Worker[], ids: string[]): Worker[] => {
+        if (!ids.length) return list;
+        const map = new Map(list.map(w => [w.id, w]));
+        const ordered = ids.filter(id => map.has(id)).map(id => map.get(id)!);
+        const rest = list.filter(w => !ids.includes(w.id));
+        return [...ordered, ...rest];
+      };
+      const regsOrdered = orderBy(ws.getRegularWorkers(campId), ws.getOrder(campId, 'sidebar', 'regular'));
+      const backsOrdered = orderBy(ws.getBackupWorkers(campId), ws.getOrder(campId, 'sidebar', 'backup'));
+      const workers = [...regsOrdered, ...backsOrdered];  // 인덱스 = sort_order (고정 먼저, 백업 다음)
       const routes = ws.routes[campId] ?? [];
       const cells = Object.values(ss.cells).filter(c => workers.some(w => w.id === c.workerId));
 
