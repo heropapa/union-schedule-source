@@ -187,20 +187,36 @@ export default function ScheduleCalendar() {
       const routes = ws.routes[campId] ?? [];
       const cells = Object.values(ss.cells).filter(c => workers.some(w => w.id === c.workerId));
 
-      await Promise.all(workers.map((w, i) => db.upsertWorker(w, i)));
-      await Promise.all(routes.map((r, i) => db.upsertRoute(roster.id, campId, r, i)));
-      if (cells.length) await db.upsertCellsBatch(cells, campId);
+      // 요청 수를 줄이기 위해 배치 upsert. 30초 넘으면 중단(타임아웃).
+      const doSave = (async () => {
+        await db.upsertWorkersBatch(workers);
+        await db.upsertRoutesBatch(roster.id, campId, routes);
+        if (cells.length) await db.upsertCellsBatch(cells, campId);
+      })();
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('__timeout__')), 30000));
+      await Promise.race([doSave, timeout]);
 
       useHistoryStore.getState().setDirty(false);
       setToast('저장 완료 ✓');
     } catch (err: unknown) {
       console.error('저장 실패:', err);
-      const msg = err instanceof Error ? err.message : '알 수 없는 오류';
-      alert('저장 실패:\n' + msg);
+      if (err instanceof Error && err.message === '__timeout__') {
+        alert('저장이 30초 넘게 응답이 없어 중단했습니다.\n네트워크(또는 Supabase 서버) 상태를 확인하고 다시 시도해주세요.');
+      } else {
+        const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+        alert('저장 실패:\n' + msg);
+      }
     } finally {
       setSaving(false);
     }
   }, [saving, canEdit, hasCampPermission, lockStatus, blockedBy]);
+
+  // 저장이 멈춰 보일 때 버튼을 눌러 취소(=버튼 잠금 해제). 변경 내용은 그대로 남음.
+  const cancelSave = useCallback(() => {
+    setSaving(false);
+    setToast('저장을 취소했습니다. 변경 내용은 남아 있어요 — 다시 저장해보세요.');
+  }, []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -815,11 +831,11 @@ export default function ScheduleCalendar() {
           </button>
           <button
             className="toolbar-btn save-btn"
-            onClick={handleSave}
-            disabled={saving || !history.dirty}
-            title="저장 (Ctrl+S)"
+            onClick={saving ? cancelSave : handleSave}
+            disabled={!saving && !history.dirty}
+            title={saving ? '저장 취소' : '저장 (Ctrl+S)'}
           >
-            {saving ? '저장 중...' : history.dirty ? '저장' : '저장됨 ✓'}
+            {saving ? '저장 중… (✕취소)' : history.dirty ? '저장' : '저장됨 ✓'}
           </button>
           <button
             className="toolbar-btn board-btn"
