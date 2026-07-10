@@ -196,6 +196,29 @@ export async function upsertWorker(worker: Worker, sortOrder: number): Promise<v
   if (error) throw error;
 }
 
+/** 여러 인원을 한 번의 요청으로 upsert (저장 시 요청 수 감소). 배열 인덱스가 sort_order. */
+export async function upsertWorkersBatch(workers: Worker[]): Promise<void> {
+  if (!workers.length) return;
+  const now = new Date().toISOString();
+  const rows = workers.map((w, i) => ({
+    id: w.id,
+    weekly_roster_id: w.weeklyRosterId,
+    camp_id: w.campId,
+    name: w.name,
+    login_id: w.loginId,
+    role: w.role,
+    assigned_routes: w.assignedRoutes,
+    rotations: w.rotations,
+    phone: w.phone ?? null,
+    vehicle: w.vehicle ?? null,
+    note: w.note ?? null,
+    sort_order: i,
+    updated_at: now,
+  }));
+  const { error } = await supabase.from('workers').upsert(rows);
+  if (error) throw error;
+}
+
 export async function deleteWorker(workerId: string): Promise<void> {
   const { error } = await supabase.from('workers').delete().eq('id', workerId);
   if (error) throw error;
@@ -298,6 +321,20 @@ export async function upsertRoute(
     },
     { onConflict: 'weekly_roster_id,route_id' },
   );
+  if (error) throw error;
+}
+
+/** 여러 라우트를 한 번의 요청으로 upsert. 배열 인덱스가 sort_order. */
+export async function upsertRoutesBatch(rosterId: string, campId: string, routes: Route[]): Promise<void> {
+  if (!routes.length) return;
+  const rows = routes.map((r, i) => ({
+    weekly_roster_id: rosterId,
+    camp_id: campId,
+    route_id: r.id,
+    sub_routes: r.subRoutes,
+    sort_order: i,
+  }));
+  const { error } = await supabase.from('routes').upsert(rows, { onConflict: 'weekly_roster_id,route_id' });
   if (error) throw error;
 }
 
