@@ -1,619 +1,174 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { format, addDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addMonths, isSameMonth } from 'date-fns';
-import { ko } from 'date-fns/locale/ko';
-import type { Worker, Route, ScheduleCell, Camp, CellStatus, WorkerRole } from '../../types';
+import { format, addDays, startOfWeek } from 'date-fns';
+import type { CellStatus } from '../../types';
 import './BoardPage.css';
 import './BoardPage2.css';
 
-type CampRow = { id: string; name: string; wave: string; color: string; company_id: string };
-type WorkerRow = {
-  id: string; weekly_roster_id: string; name: string; login_id: string; camp_id: string;
-  role: WorkerRole; assigned_routes: string[] | null; rotations: string[] | null;
-};
-type RouteRow = { route_id: string; sub_routes: string[] | null };
-type CellRow = { worker_id: string; date: string; status: CellStatus; routes: string[] | null };
-
 /**
- * 공개 게시판용 Supabase 클라이언트.
- *
- * 이전엔 atone 전용 계정(email/pw 하드코딩)으로 로그인해서 데이터를
- * 읽었으나, 비밀번호가 Vite 번들에 평문 노출되는 문제로 anon key + RLS
- * 정책으로 전환 (2026-05-27). 필요한 RLS 정책은
- *   supabase/rls-public-board.sql
- * 에 있으니 Supabase 대시보드에서 먼저 적용해야 함.
- *
- * 익명 세션이므로 persistSession/autoRefreshToken 모두 비활성화 —
- * admin이 같은 브라우저에서 사용 중일 때 세션 간섭 방지.
+ * 공개 스케쥴 게시판 (v1.1 주간).
+ * 로그인 없이 anon 키로 "게시판에 공개(published)"된 캠프의 이번 주 스케줄만 열람.
+ * 필요한 anon RLS 정책: supabase/v1.8-board-rls.sql
  */
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-
 const boardSupabase = createClient(supabaseUrl, supabaseAnonKey, {
   // 별도 storageKey로 메인 클라이언트와 auth lock/저장키를 분리
-  // (같은 키를 공유하면 "Multiple GoTrueClient instances" 로 로그인 요청이
-  //  교착되어 로그인 후 흰 화면이 됨)
+  // (같은 키를 공유하면 "Multiple GoTrueClient instances" 로 로그인이 교착)
   auth: { persistSession: false, autoRefreshToken: false, storageKey: 'usp-board-anon' },
 });
 
-interface Snapshot {
-  workers: Worker[];
-  routes: Record<string, Route[]>;
-  cells: Record<string, ScheduleCell>;
-  camps?: Camp[];
-}
-
 const DAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
 
-type WaveTab = 'WAVE1' | 'WAVE2';
-const WAVE_LABELS: Record<WaveTab, string> = { WAVE1: '야간', WAVE2: '주간' };
-
-/** 달력 그리드용 날짜 배열 */
-function buildCalendarDates(year: number, month: number): Date[] {
-  const monthStart = startOfMonth(new Date(year, month, 1));
-  const monthEnd = endOfMonth(monthStart);
-  const calStart = startOfWeek(monthStart, { weekStartsOn: 0 });
-  const calEnd = endOfWeek(monthEnd, { weekStartsOn: 0 });
-  const dates: Date[] = [];
-  let d = calStart;
-  while (d <= calEnd) {
-    dates.push(d);
-    d = addDays(d, 1);
-  }
-  return dates;
-}
-
-/** 주 단위 배열 생성 (일~토) — 두 달치 */
-function buildWeeks(today: Date): Date[][] {
-  const m1Start = startOfMonth(today);
-  const m2End = endOfMonth(addMonths(today, 1));
-  const calStart = startOfWeek(m1Start, { weekStartsOn: 0 });
-  const calEnd = endOfWeek(m2End, { weekStartsOn: 0 });
-  const weeks: Date[][] = [];
-  let d = calStart;
-  while (d <= calEnd) {
-    const week: Date[] = [];
-    for (let i = 0; i < 7; i++) { week.push(d); d = addDays(d, 1); }
-    weeks.push(week);
-  }
-  return weeks;
-}
+type BW = {
+  id: string; name: string; loginId: string; role: 'regular' | 'backup';
+  assignedRoutes: string[]; rotations: string[];
+};
+type BCamp = { id: string; name: string; wave: string; color: string };
+type Cell = { status: CellStatus; routes: string[] };
+type CampBlock = { camp: BCamp; regulars: BW[]; backups: BW[]; cells: Record<string, Cell> };
 
 export default function BoardPage2() {
-  const [snap, setSnap] = useState<Snapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedCamp, setExpandedCamp] = useState<string | null>(null);
-  const [waveTab, setWaveTab] = useState<WaveTab>('WAVE2');
-  const [viewMode, setViewMode] = useState<'calendar' | 'table'>('calendar');
-  const [detailDate, setDetailDate] = useState<string | null>(null);
-  const [collapsedWeeks, setCollapsedWeeks] = useState<Set<number>>(new Set());
+  const [blocks, setBlocks] = useState<CampBlock[]>([]);
 
-  const today = useMemo(() => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
-  }, []);
-  const todayStr = format(today, 'yyyy-MM-dd');
-  const v2Weeks = useMemo(() => buildWeeks(today), [today]);
+  const weekStart = startOfWeek(new Date(), { weekStartsOn: 0 });
+  const weekDates = Array.from({ length: 7 }, (_, i) => format(addDays(weekStart, i), 'yyyy-MM-dd'));
+  const weekLabel = format(weekStart, 'yyyy년 M월 d일') + ' 주';
 
-  const months = useMemo(() => {
-    const m1 = { year: today.getFullYear(), month: today.getMonth() };
-    const next = addMonths(today, 1);
-    const m2 = { year: next.getFullYear(), month: next.getMonth() };
-    return [m1, m2];
-  }, [today]);
-
-  /* 데이터 로드 — anon key로 published 캠프만 RLS 통해 SELECT */
   useEffect(() => {
     (async () => {
       try {
-        // 1) published 캠프 목록 로드 (RLS: anon_select_published_camps)
-        const { data: campRows, error: campErr } = await boardSupabase
-          .from('camps')
-          .select('*')
-          .eq('published', true)
-          .order('sort_order');
-        if (campErr) throw new Error('캠프 로드 실패: ' + campErr.message);
+        const wk = format(weekStart, 'yyyy-MM-dd');
+        const { data: campRows, error: ce } = await boardSupabase
+          .from('camps').select('*').eq('published', true).order('sort_order');
+        if (ce) throw new Error('캠프 로드 실패: ' + ce.message);
 
-        const camps: Camp[] = (campRows ?? []).map((r: CampRow) => ({
-          id: r.id, name: r.name, wave: r.wave, color: r.color, companyId: r.company_id,
-        }));
-
-        if (camps.length === 0) {
-          // published 캠프가 없으면 전체 캠프 로드 (하위호환)
-          const { data: allCampRows } = await boardSupabase.from('camps').select('*').order('sort_order');
-          camps.push(...(allCampRows ?? []).map((r: CampRow) => ({
-            id: r.id, name: r.name, wave: r.wave, color: r.color, companyId: r.company_id,
-          })));
-        }
-
-        // 2) 각 캠프의 workers, routes, cells 병렬 로드
-        const allWorkers: Worker[] = [];
-        const allRoutes: Record<string, Route[]> = {};
-        const allCells: Record<string, ScheduleCell> = {};
-
-        await Promise.all(camps.map(async (camp) => {
-          const [wRes, rRes, cRes] = await Promise.all([
-            boardSupabase.from('workers').select('*').eq('camp_id', camp.id).order('sort_order'),
-            boardSupabase.from('routes').select('*').eq('camp_id', camp.id).order('sort_order'),
-            boardSupabase.from('schedule_cells').select('*').eq('camp_id', camp.id),
-          ]);
-
-          const workers: Worker[] = (wRes.data ?? []).map((r: WorkerRow) => ({
-            id: r.id, weeklyRosterId: r.weekly_roster_id,
-            name: r.name, loginId: r.login_id, campId: r.camp_id,
-            role: r.role, assignedRoutes: r.assigned_routes ?? [], rotations: r.rotations ?? [],
-          }));
-          allWorkers.push(...workers);
-
-          allRoutes[camp.id] = (rRes.data ?? []).map((r: RouteRow) => ({
-            id: r.route_id, subRoutes: r.sub_routes ?? [],
-          }));
-
-          for (const r of (cRes.data ?? []) as CellRow[]) {
-            allCells[`${r.worker_id}::${r.date}`] = {
-              workerId: r.worker_id, date: r.date, status: r.status, routes: r.routes ?? [],
-            };
+        const result: CampBlock[] = [];
+        for (const cr of campRows ?? []) {
+          const camp: BCamp = { id: cr.id, name: cr.name, wave: cr.wave, color: cr.color };
+          // 이번 주 roster
+          const { data: rosterRows } = await boardSupabase
+            .from('weekly_rosters').select('id').eq('camp_id', cr.id).eq('week_start', wk).limit(1);
+          const roster = rosterRows?.[0];
+          let regulars: BW[] = [], backups: BW[] = [];
+          const cells: Record<string, Cell> = {};
+          if (roster) {
+            const { data: wRows } = await boardSupabase
+              .from('workers').select('*').eq('weekly_roster_id', roster.id).order('sort_order');
+            const workers: BW[] = (wRows ?? []).map((r) => ({
+              id: r.id, name: r.name, loginId: r.login_id, role: r.role,
+              assignedRoutes: r.assigned_routes ?? [], rotations: r.rotations ?? [],
+            }));
+            regulars = workers.filter((w) => w.role === 'regular');
+            backups = workers.filter((w) => w.role === 'backup');
+            const { data: cRows } = await boardSupabase
+              .from('schedule_cells').select('*')
+              .eq('camp_id', cr.id).gte('date', weekDates[0]).lte('date', weekDates[6]);
+            for (const c of cRows ?? []) {
+              cells[`${c.worker_id}::${c.date}`] = { status: c.status, routes: c.routes ?? [] };
+            }
           }
-        }));
-
-        setSnap({ workers: allWorkers, routes: allRoutes, cells: allCells, camps });
-      } catch (e: unknown) {
-        // RLS 정책이 누락된 경우 캠프 SELECT가 0행으로 와서 빈 화면이 됨.
-        // 명시적 에러보다 게시판이 비어보이는 게 더 흔한 증상이므로
-        // supabase/rls-public-board.sql 적용 여부부터 확인할 것.
+          result.push({ camp, regulars, backups, cells });
+        }
+        setBlocks(result);
+      } catch (e) {
         setError(e instanceof Error ? e.message : '알 수 없는 오류');
       } finally {
         setLoading(false);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function getEffectiveCell(worker: Worker, date: string): { status: string; routes: string[] } | undefined {
-    if (!snap) return undefined;
-    const cell = snap.cells[`${worker.id}::${date}`];
-    if (cell) return cell;
-    if (worker.role === 'regular') return { status: 'work', routes: worker.assignedRoutes };
+  function effectiveCell(w: BW, date: string, cells: Record<string, Cell>): Cell | undefined {
+    const c = cells[`${w.id}::${date}`];
+    if (c) return c;
+    if (w.role === 'regular') return { status: 'work', routes: w.assignedRoutes };
     return undefined;
   }
-
-  function getDaySummary(date: string, regulars: Worker[], backups: Worker[], camp: Camp) {
-    const offWorkers = regulars.filter((w) => getEffectiveCell(w, date)?.status === 'off')
-      .sort((a, b) => a.name.localeCompare(b.name));
-    const activeBackups = backups.filter((w) => {
-      const cell = getEffectiveCell(w, date);
-      return cell && (cell.status === 'work' || cell.status === 'custom') && cell.routes.length > 0;
-    });
-    const campRoutes = snap!.routes[camp.id];
-    const allSubs = campRoutes ? campRoutes.flatMap((r) => r.subRoutes) : [];
-    const covered = new Set<string>();
-    [...regulars, ...backups].forEach((w) => {
-      const cell = getEffectiveCell(w, date);
-      if (cell && (cell.status === 'work' || cell.status === 'custom')) {
-        cell.routes.forEach((r) => covered.add(r));
-      }
-    });
-    const uncovered = allSubs.filter((r) => !covered.has(r));
-    return { offWorkers, activeBackups, uncovered };
+  function cellText(ec: Cell | undefined): string {
+    if (!ec) return '';
+    if (ec.status === 'off') return '휴';
+    if (ec.status === 'custom') return ec.routes.join(', ') || '직접';
+    if (ec.status === 'work') return ec.routes.join(', ') || '근';
+    return '';
+  }
+  function cellClass(ec: Cell | undefined): string {
+    if (!ec) return 'bcell-empty';
+    if (ec.status === 'off') return 'bcell-off';
+    if (ec.status === 'custom') return 'bcell-custom';
+    if (ec.status === 'work') return 'bcell-work';
+    return 'bcell-empty';
   }
 
-  const campGroups = useMemo(() => {
-    if (!snap) return [];
-    return (snap.camps || [])
-      .filter((camp) => (camp.wave || 'WAVE1') === waveTab)
-      .map((camp) => {
-        const workers = snap.workers.filter((w) => w.campId === camp.id);
-        const workerIds = new Set(workers.map((w) => w.id));
-        const hasCells = Object.keys(snap.cells).some((k) => workerIds.has(k.split('::')[0]));
-        return { camp, regulars: workers.filter((w) => w.role === 'regular'), backups: workers.filter((w) => w.role === 'backup'), hasCells };
-      });
-  }, [snap, waveTab]);
-
-  useEffect(() => { setExpandedCamp(null); setDetailDate(null); }, [waveTab]);
-
-  if (loading) return <div className="board-loading"><div className="board-spinner" /><p>스케쥴 불러오는 중...</p></div>;
-  if (error) return <div className="board-error"><p>⚠️ {error}</p><button onClick={() => window.location.reload()}>새로고침</button></div>;
+  function renderRows(list: BW[], label: string, cells: Record<string, Cell>) {
+    if (list.length === 0) return null;
+    return (
+      <>
+        <tr className="brow-section"><td colSpan={weekDates.length + 1}>{label}</td></tr>
+        {list.map((w) => (
+          <tr key={w.id}>
+            <td className="bname">{w.name}</td>
+            {weekDates.map((d) => {
+              const ec = effectiveCell(w, d, cells);
+              return <td key={d} className={`bcell ${cellClass(ec)}`}>{cellText(ec)}</td>;
+            })}
+          </tr>
+        ))}
+      </>
+    );
+  }
 
   return (
-    <div className="board-container">
-      <header className="board-header">
+    <div className="board-page">
+      <div className="board-header">
         <h1>📋 스케쥴 게시판</h1>
-      </header>
-
-      <div className="wave-tabs">
-        {(['WAVE2', 'WAVE1'] as WaveTab[]).map((w) => (
-          <button key={w} className={`wave-tab ${waveTab === w ? 'active' : ''}`} onClick={() => setWaveTab(w)}>
-            {WAVE_LABELS[w]}
-          </button>
-        ))}
+        <p className="board-week">{weekLabel}</p>
+        <p className="board-note">본인 이름을 찾아 이번 주 근무를 확인하세요. (근무=라우트/근, 휴무=휴)</p>
       </div>
 
-      <div className="board-camps">
-        {campGroups.length === 0 && <div className="board-empty">등록된 캠프가 없습니다</div>}
-        {campGroups.map(({ camp, regulars, backups, hasCells }) => {
-          const isExpanded = expandedCamp === camp.id;
-          const hasWorkers = regulars.length > 0 || backups.length > 0;
-          const showContent = hasWorkers && hasCells;
-          return (
-            <section key={camp.id} className="board-camp">
-              <button
-                className={`camp-toggle ${isExpanded ? 'expanded' : ''} ${!showContent ? 'empty-camp' : ''}`}
-                style={{ borderLeftColor: camp.color }}
-                onClick={() => { setExpandedCamp(isExpanded ? null : camp.id); setDetailDate(null); }}
-              >
-                <span className="camp-name">{camp.name}</span>
-                <span className="camp-arrow">{isExpanded ? '▲' : '▼'}</span>
-              </button>
+      {loading && <div className="board-msg">불러오는 중…</div>}
+      {error && (
+        <div className="board-msg board-err">
+          불러오기 오류: {error}<br />
+          <small>공개 열람 설정(RLS)이 적용됐는지 확인이 필요할 수 있어요.</small>
+        </div>
+      )}
+      {!loading && !error && blocks.length === 0 && (
+        <div className="board-msg">공개된 캠프가 없습니다. (관리자가 캠프를 "게시판에 공개"로 설정해야 보입니다.)</div>
+      )}
 
-              {isExpanded && (
-                <div className="camp-calendar-wrap">
-                  {!showContent ? (
-                    <div className="camp-no-workers">등록된 스케쥴이 없습니다</div>
-                  ) : (<>
-                    {/* 달력/테이블 전환 */}
-                    <div className="view-toggle">
-                      <button className={`view-btn ${viewMode === 'calendar' ? 'active' : ''}`} onClick={() => { setViewMode('calendar'); setDetailDate(null); }}>월간뷰</button>
-                      <button className={`view-btn ${viewMode === 'table' ? 'active' : ''}`} onClick={() => { setViewMode('table'); setDetailDate(null); }}>주간뷰</button>
-                    </div>
-
-                    {/* ── 달력 뷰 ── */}
-                    {viewMode === 'calendar' && months.map(({ year, month }) => {
-                      const calDates = buildCalendarDates(year, month);
-                      const monthRef = new Date(year, month, 1);
-                      const weeks: Date[][] = [];
-                      for (let i = 0; i < calDates.length; i += 7) weeks.push(calDates.slice(i, i + 7));
-
-                      return (
-                        <div key={`${year}-${month}`} className="cal-month">
-                          <div className="cal-month-title">{format(monthRef, 'yyyy년 M월')}</div>
-                          <table className="cal-table">
-                            <thead>
-                              <tr>
-                                {DAY_LABELS.map((label, i) => (
-                                  <th key={i} className={i === 0 ? 'sun' : i === 6 ? 'sat' : ''}>{label}</th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {weeks.map((week, wi) => {
-                                const weekDates = week.map((wd) => format(wd, 'yyyy-MM-dd'));
-                                const hasDetail = detailDate && weekDates.includes(detailDate);
-
-                                const weekSummaries = week.map((d, i) => {
-                                  const inMonth = isSameMonth(d, monthRef);
-                                  return inMonth && hasWorkers ? getDaySummary(weekDates[i], regulars, backups, camp) : null;
-                                });
-                                const maxOff = Math.max(0, ...weekSummaries.map((s) => s?.offWorkers.length ?? 0));
-                                const maxBackup = Math.max(0, ...weekSummaries.map((s) => s?.activeBackups.length ?? 0));
-                                const maxUncovered = Math.max(0, ...weekSummaries.map((s) => s?.uncovered.length ?? 0));
-
-                                const CHIP_H = 17;
-                                const LABEL_H = 14;
-                                const offMinH = maxOff > 0 ? LABEL_H + maxOff * CHIP_H : 0;
-                                const backupMinH = maxBackup > 0 ? LABEL_H + maxBackup * CHIP_H : 0;
-                                const uncoveredMinH = maxUncovered > 0 ? LABEL_H + maxUncovered * CHIP_H : 0;
-
-                                return (
-                                  <React.Fragment key={wi}>
-                                    <tr>
-                                      {week.map((d, di) => {
-                                        const dateStr = weekDates[di];
-                                        const inMonth = isSameMonth(d, monthRef);
-                                        const isToday = dateStr === todayStr;
-                                        const dayIdx = d.getDay();
-                                        const summary = weekSummaries[di];
-
-                                        return (
-                                          <td
-                                            key={di}
-                                            className={[
-                                              !inMonth ? 'out-month' : '',
-                                              isToday ? 'cal-today' : '',
-                                              dateStr === detailDate ? 'cal-selected' : '',
-                                              dayIdx === 0 ? 'sun' : dayIdx === 6 ? 'sat' : '',
-                                            ].filter(Boolean).join(' ')}
-                                            onClick={() => { if (inMonth) setDetailDate(dateStr === detailDate ? null : dateStr); }}
-                                          >
-                                            <div className="cal-day-num-wrap">
-                                              <span className={`cal-day-num ${isToday ? 'today-circle' : ''}`}>
-                                                {d.getDate()}
-                                              </span>
-                                            </div>
-                                            {summary && inMonth && (
-                                              <div className="cal-cell-content">
-                                                {maxOff > 0 && (
-                                                  <div className="cell-section cell-off" style={{ minHeight: offMinH }}>
-                                                    {summary.offWorkers.length > 0 && (
-                                                      <>
-                                                        <span className="cell-section-label off-label">휴무</span>
-                                                        <div className="cell-names">
-                                                          {summary.offWorkers.map((w) => (
-                                                            <span key={w.id} className="cell-off-name">{w.name}</span>
-                                                          ))}
-                                                        </div>
-                                                      </>
-                                                    )}
-                                                  </div>
-                                                )}
-                                                {maxBackup > 0 && (
-                                                  <div className="cell-section cell-backup" style={{ minHeight: backupMinH }}>
-                                                    {summary.activeBackups.length > 0 && (
-                                                      <>
-                                                        <span className="cell-section-label backup-label">백업</span>
-                                                        <div className="cell-names">
-                                                          {summary.activeBackups.map((w) => (
-                                                            <span key={w.id} className="cell-backup-name">{w.name}</span>
-                                                          ))}
-                                                        </div>
-                                                      </>
-                                                    )}
-                                                  </div>
-                                                )}
-                                                {maxUncovered > 0 && (
-                                                  <div className="cell-section cell-uncovered" style={{ minHeight: uncoveredMinH }}>
-                                                    {summary.uncovered.length > 0 && (
-                                                      <>
-                                                        <span className="cell-section-label uncovered-label">미커버</span>
-                                                        <div className="cell-names">
-                                                          {summary.uncovered.map((r) => (
-                                                            <span key={r} className="cell-uncovered-route">{r}</span>
-                                                          ))}
-                                                        </div>
-                                                      </>
-                                                    )}
-                                                  </div>
-                                                )}
-                                              </div>
-                                            )}
-                                          </td>
-                                        );
-                                      })}
-                                    </tr>
-
-                                    {/* 상세 패널: 해당 주 바로 아래 */}
-                                    {hasDetail && (() => {
-                                      const dd = new Date(detailDate + 'T00:00:00');
-                                      const s = getDaySummary(detailDate, regulars, backups, camp);
-                                      return (
-                                        <tr className="detail-row">
-                                          <td colSpan={7}>
-                                            <div className="cal-detail">
-                                              <div className="cal-detail-header">
-                                                <span className="cal-detail-date">
-                                                  {format(dd, 'M월 d일 (EEE)', { locale: ko })}
-                                                </span>
-                                                <button className="cal-detail-close" onClick={() => setDetailDate(null)}>✕</button>
-                                              </div>
-                                              {s.offWorkers.length > 0 && (
-                                                <div className="detail-section">
-                                                  <div className="detail-label off-label">🏖️ 휴무 ({s.offWorkers.length}명)</div>
-                                                  <div className="detail-chips">
-                                                    {s.offWorkers.map((w) => (
-                                                      <span key={w.id} className="chip chip-off">{w.name} <span className="chip-route">{w.assignedRoutes.join(', ')}</span></span>
-                                                    ))}
-                                                  </div>
-                                                </div>
-                                              )}
-                                              {s.activeBackups.length > 0 && (
-                                                <div className="detail-section">
-                                                  <div className="detail-label backup-label">🔄 백업 현황 ({s.activeBackups.length}명)</div>
-                                                  <div className="detail-chips">
-                                                    {s.activeBackups.map((w) => {
-                                                      const cell = getEffectiveCell(w, detailDate)!;
-                                                      return (
-                                                        <span key={w.id} className="chip chip-backup">
-                                                          {w.name} → <span className="chip-route">{cell.routes.join(', ')}</span>
-                                                        </span>
-                                                      );
-                                                    })}
-                                                  </div>
-                                                </div>
-                                              )}
-                                              {s.uncovered.length > 0 && (
-                                                <div className="detail-section">
-                                                  <div className="detail-label uncovered-label">⚠️ 미커버 ({s.uncovered.length}개)</div>
-                                                  <div className="detail-chips">
-                                                    {s.uncovered.map((r) => (
-                                                      <span key={r} className="chip chip-uncovered">{r}</span>
-                                                    ))}
-                                                  </div>
-                                                </div>
-                                              )}
-                                              {s.offWorkers.length === 0 && s.activeBackups.length === 0 && s.uncovered.length === 0 && (
-                                                <div className="detail-nothing">휴무자 없음</div>
-                                              )}
-                                            </div>
-                                          </td>
-                                        </tr>
-                                      );
-                                    })()}
-                                  </React.Fragment>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      );
-                    })}
-
-                    {/* ── 테이블 뷰 ── */}
-                    {viewMode === 'table' && (
-                      <div className="v2-wrap">
-                        {v2Weeks.map((week, wi) => {
-                          const weekDates = week.map((d) => format(d, 'yyyy-MM-dd'));
-                          const weekLabel = `${format(week[0], 'M/d')} ~ ${format(week[6], 'M/d')}`;
-
-                          const offByDate: Record<string, string[]> = {};
-                          weekDates.forEach((d) => {
-                            offByDate[d] = regulars
-                              .filter((w) => getEffectiveCell(w, d)?.status === 'off')
-                              .map((w) => w.name)
-                              .sort((a, b) => a.localeCompare(b));
-                          });
-                          const maxOff = Math.max(0, ...Object.values(offByDate).map((a) => a.length));
-
-                          /* 이 주에 실제 스케쥴이 있는 백업만 필터 */
-                          const sortedBackups = [...backups]
-                            .filter((w) => weekDates.some((d) => {
-                              const cell = getEffectiveCell(w, d);
-                              return cell && (cell.status === 'work' || cell.status === 'custom') && cell.routes.length > 0;
-                            }))
-                            .sort((a, b) => a.name.localeCompare(b.name));
-
-                          const hasData = maxOff > 0 || sortedBackups.length > 0;
-
-                          /* 오늘 이전 주 또는 데이터 없는 주 → 기본 접기 */
-                          const weekEnd = weekDates[6];
-                          const isPast = weekEnd < todayStr;
-                          const defaultCollapsed = isPast || !hasData;
-                          const isCollapsed = collapsedWeeks.has(wi) ? !defaultCollapsed : defaultCollapsed;
-
-                          return (
-                            <div key={wi} className={`v2-week-block ${defaultCollapsed ? 'v2-past' : ''}`}>
-                              <div
-                                className="v2-week-label"
-                                onClick={() => {
-                                  setCollapsedWeeks((prev) => {
-                                    const next = new Set(prev);
-                                    if (next.has(wi)) next.delete(wi); else next.add(wi);
-                                    return next;
-                                  });
-                                }}
-                                style={{ cursor: 'pointer' }}
-                              >
-                                {weekLabel}
-                                <span className="v2-collapse-icon">{isCollapsed ? '▼' : '▲'}</span>
-                              </div>
-                              {!isCollapsed && (!hasData ? (
-                                <div className="v2-empty-week">등록된 스케쥴 없음</div>
-                              ) : <div className="v2-table-scroll">
-                                <table className="v2-table">
-                                  <thead>
-                                    <tr>
-                                      <th className="v2-header-cell v2-name-col">휴무자</th>
-                                      {week.map((d, di) => {
-                                        const dayIdx = d.getDay();
-                                        const dateStr = weekDates[di];
-                                        const isToday = dateStr === todayStr;
-                                        return (
-                                          <th
-                                            key={di}
-                                            className={`v2-header-cell v2-header-clickable ${dayIdx === 0 ? 'sun' : dayIdx === 6 ? 'sat' : ''} ${isToday ? 'v2-today' : ''} ${dateStr === detailDate ? 'v2-selected' : ''}`}
-                                            onClick={() => setDetailDate(dateStr === detailDate ? null : dateStr)}
-                                          >
-                                            <div>{format(d, 'M/d')}</div>
-                                            <div className="v2-day-label">{DAY_LABELS[dayIdx]}</div>
-                                          </th>
-                                        );
-                                      })}
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {maxOff > 0 && Array.from({ length: maxOff }).map((_, i) => (
-                                      <tr key={`off-${i}`} className="v2-off-row">
-                                        <td className="v2-cell v2-name-col v2-row-num">{i + 1}</td>
-                                        {weekDates.map((d) => (
-                                          <td key={d} className="v2-cell v2-off-cell v2-cell-clickable" onClick={() => setDetailDate(d === detailDate ? null : d)}>{offByDate[d][i] || ''}</td>
-                                        ))}
-                                      </tr>
-                                    ))}
-
-                                    <tr className="v2-section-header v2-backup-header">
-                                      <th className="v2-header-cell v2-name-col">백업</th>
-                                      {weekDates.map((d) => (
-                                        <th key={d} className="v2-header-cell">백업대상</th>
-                                      ))}
-                                    </tr>
-
-                                    {sortedBackups.map((w) => (
-                                      <tr key={w.id} className="v2-backup-row">
-                                        <td className="v2-cell v2-name-col v2-backup-name">{w.name}</td>
-                                        {weekDates.map((d) => {
-                                          const cell = getEffectiveCell(w, d);
-                                          const hasWork = cell && (cell.status === 'work' || cell.status === 'custom') && cell.routes.length > 0;
-                                          return (
-                                            <td key={d} className={`v2-cell v2-cell-clickable ${hasWork ? 'v2-route-cell' : 'v2-empty-cell'}`} onClick={() => setDetailDate(d === detailDate ? null : d)}>
-                                              {hasWork ? cell!.routes.join(',') : ''}
-                                            </td>
-                                          );
-                                        })}
-                                      </tr>
-                                    ))}
-
-                                  </tbody>
-                                </table>
-                              </div>)}
-
-                              {/* 주간뷰 상세 패널 */}
-                              {detailDate && weekDates.includes(detailDate) && (() => {
-                                const dd = new Date(detailDate + 'T00:00:00');
-                                const s = getDaySummary(detailDate, regulars, backups, camp);
-                                return (
-                                  <div className="cal-detail">
-                                    <div className="cal-detail-header">
-                                      <span className="cal-detail-date">
-                                        {format(dd, 'M월 d일 (EEE)', { locale: ko })}
-                                      </span>
-                                      <button className="cal-detail-close" onClick={() => setDetailDate(null)}>✕</button>
-                                    </div>
-                                    {s.offWorkers.length > 0 && (
-                                      <div className="detail-section">
-                                        <div className="detail-label off-label">🏖️ 휴무 ({s.offWorkers.length}명)</div>
-                                        <div className="detail-chips">
-                                          {s.offWorkers.map((w) => (
-                                            <span key={w.id} className="chip chip-off">{w.name} <span className="chip-route">{w.assignedRoutes.join(', ')}</span></span>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    )}
-                                    {s.activeBackups.length > 0 && (
-                                      <div className="detail-section">
-                                        <div className="detail-label backup-label">🔄 백업 ({s.activeBackups.length}명)</div>
-                                        <div className="detail-chips">
-                                          {s.activeBackups.map((w) => {
-                                            const cell = getEffectiveCell(w, detailDate)!;
-                                            return (
-                                              <span key={w.id} className="chip chip-backup">
-                                                {w.name} → <span className="chip-route">{cell.routes.join(', ')}</span>
-                                              </span>
-                                            );
-                                          })}
-                                        </div>
-                                      </div>
-                                    )}
-                                    {s.uncovered.length > 0 && (
-                                      <div className="detail-section">
-                                        <div className="detail-label uncovered-label">⚠️ 미커버 ({s.uncovered.length}개)</div>
-                                        <div className="detail-chips">
-                                          {s.uncovered.map((r) => (
-                                            <span key={r} className="chip chip-uncovered">{r}</span>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    )}
-                                    {s.offWorkers.length === 0 && s.activeBackups.length === 0 && s.uncovered.length === 0 && (
-                                      <div className="detail-nothing">휴무자 없음</div>
-                                    )}
-                                  </div>
-                                );
-                              })()}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </>)}
-                </div>
-              )}
-            </section>
-          );
-        })}
-      </div>
-
-      <footer className="board-footer">
-        <a href="#/" className="back-link">관리 페이지</a>
-      </footer>
+      {!loading && !error && blocks.map(({ camp, regulars, backups, cells }) => (
+        <div className="board-camp" key={camp.id}>
+          <h2 className="board-camp-title">
+            <span className="camp-dot" style={{ background: camp.color || '#888' }} />
+            {camp.name}
+            <span className="board-wave">{camp.wave === 'WAVE2' ? '주간' : '야간'}</span>
+          </h2>
+          {regulars.length === 0 && backups.length === 0 ? (
+            <div className="board-msg board-empty-camp">이번 주 등록된 인원이 없습니다.</div>
+          ) : (
+            <div className="board-table-wrap">
+              <table className="board-table">
+                <thead>
+                  <tr>
+                    <th className="bname">이름</th>
+                    {weekDates.map((d, i) => (
+                      <th key={d}>{DAY_LABELS[i]}<br /><span className="bdate">{d.slice(5)}</span></th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {renderRows(regulars, '고정 인원', cells)}
+                  {renderRows(backups, '백업 인원', cells)}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
