@@ -13,12 +13,8 @@ import './BoardPage2.css';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const boardSupabase = createClient(supabaseUrl, supabaseAnonKey, {
-<<<<<<< Updated upstream
   // 별도 storageKey로 메인 클라이언트와 auth lock/저장키를 분리
-  // (같은 키를 공유하면 "Multiple GoTrueClient instances" 로 로그인 요청이
-  //  교착되어 로그인 후 흰 화면이 됨)
-=======
->>>>>>> Stashed changes
+  // (같은 키를 공유하면 "Multiple GoTrueClient instances" 로 로그인이 교착)
   auth: { persistSession: false, autoRefreshToken: false, storageKey: 'usp-board-anon' },
 });
 
