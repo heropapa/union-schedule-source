@@ -123,6 +123,11 @@ export default function BoardPage2() {
 
   return (
     <div className="board-page">
+      <div className="board-topbar">
+        <a className="board-back-btn" href="#/" onClick={() => { window.location.hash = ''; }}>
+          ← 스케줄 관리(로그인)
+        </a>
+      </div>
       <div className="board-header">
         <h1>📋 스케쥴 게시판</h1>
         <p className="board-week">{weekLabel}</p>

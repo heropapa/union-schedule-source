@@ -161,3 +161,12 @@
 .bcell-off { background: #fbe4e4; color: #a12; }
 .bcell-custom { background: #e3edfb; }
 .bcell-empty { background: #fff; color: #ccc; }
+
+.board-topbar { max-width: 1100px; margin: 0 auto; padding: 8px 16px 0; }
+.board-back-btn {
+  display: inline-block; text-decoration: none;
+  font-size: 13px; color: #1a5aa0;
+  border: 1px solid #cfe0f0; background: #f4f8fd;
+  border-radius: 6px; padding: 5px 12px;
+}
+.board-back-btn:hover { background: #e7f0fb; }
