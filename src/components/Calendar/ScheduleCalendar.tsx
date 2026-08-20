@@ -6,7 +6,7 @@ import type { ScheduleImportResult } from '../../utils/importScheduleExcel';
 import AccountManager from '../Admin/AccountManager';
 import { markDirty } from '../../store/historyBridge';
 import { DAY_LABELS, COMPANIES } from '../../types';
-import type { Worker, CellStatus, CampLock } from '../../types';
+import type { Worker, CellStatus, CampLock, WeeklyRoster } from '../../types';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale/ko';
 // xlsx는 282KB로 무거워서, 엑셀 export 버튼을 누르는 순간에만 동적 로드한다.
@@ -63,6 +63,9 @@ export default function ScheduleCalendar() {
   // 수동 잠금: 기본은 보기 전용. 사용자가 '편집 시작'을 눌러야 잠금을 획득.
   const [editMode, setEditMode] = useState(false);
   const [exitPrompt, setExitPrompt] = useState(false);  // 저장 안 한 변경 있는 채로 편집 종료 시
+  // 다른 주 스케줄 통째 불러오기 모달 (roster 목록)
+  const [schedLoad, setSchedLoad] = useState<WeeklyRoster[] | null>(null);
+  const [schedBusy, setSchedBusy] = useState(false);
   // viewer 권한자가 권한 없는 캠프를 봐도 lock을 잡지 않게 하고,
   // canEdit으로 셀/우클릭/저장 가드까지 한 번에 막는다.
   const hasCampPermission = store.selectedCampId ? auth.canEditCamp(store.selectedCampId) : false;
@@ -228,6 +231,39 @@ export default function ScheduleCalendar() {
     setSaving(false);
     setToast('저장을 취소했습니다. 변경 내용은 남아 있어요 — 다시 저장해보세요.');
   }, []);
+
+  // ── 다른 주 스케줄 통째 불러오기 (인원+라우트+근무/휴무) ──
+  async function openScheduleLoad() {
+    if (!canEdit) {
+      alert(lockStatus === 'viewing'
+        ? "먼저 상단 '🔒 편집 시작'을 눌러주세요."
+        : '편집 가능한 상태에서만 불러올 수 있습니다.');
+      return;
+    }
+    try {
+      const rosters = await db.listRostersByCamp(store.selectedCampId);
+      setSchedLoad(rosters.filter((r) => r.weekStart !== weekStartStr));
+    } catch (e) {
+      alert('주차 목록을 불러올 수 없습니다.\n' + (e instanceof Error ? e.message : ''));
+    }
+  }
+
+  async function pickScheduleWeek(r: WeeklyRoster) {
+    if (!confirm(`${r.weekStart} 주의 스케줄 전체(인원·라우트·근무/휴무)를 현재 주로 덮어쓸까요?\n현재 주의 기존 내용은 사라집니다.`)) return;
+    setSchedBusy(true);
+    try {
+      await useWorkerStore.getState().copyScheduleFromWeek(r.id, r.weekStart);
+      // 셀 로컬 상태 새로고침 (남은 옛 셀 제거)
+      useScheduleStore.setState({ cells: {} });
+      await useScheduleStore.getState().loadCells(store.selectedCampId);
+      setSchedLoad(null);
+      setToast('스케줄을 불러왔습니다 ✓ (저장 버튼으로 확정)');
+    } catch (e) {
+      alert('스케줄 불러오기 실패:\n' + (e instanceof Error ? e.message : JSON.stringify(e)));
+    } finally {
+      setSchedBusy(false);
+    }
+  }
 
   // 편집 종료 시 선택지: 저장 후 종료 / 저장 안 하고 종료 / 취소
   async function exitSaveThenClose() {
@@ -849,6 +885,16 @@ export default function ScheduleCalendar() {
                 : '🔒 편집 시작'}
             </button>
           )}
+          {store.selectedCampId && hasCampPermission && (
+            <button
+              className="toolbar-btn"
+              onClick={openScheduleLoad}
+              disabled={schedBusy}
+              title="다른 주의 스케줄 전체(인원·라우트·근무/휴무)를 현재 주로 복사"
+            >
+              📅 스케줄 불러오기
+            </button>
+          )}
           <button
             className="toolbar-btn undo-btn"
             onClick={history.undo}
@@ -1243,6 +1289,33 @@ export default function ScheduleCalendar() {
               <button className="camp-save-btn" onClick={exitSaveThenClose}>💾 저장 후 종료</button>
               <button className="camp-cancel-btn" onClick={exitDiscardChanges}>🗑 저장 안 하고 종료</button>
               <button className="camp-cancel-btn" onClick={() => setExitPrompt(false)}>↩ 취소 (계속 편집)</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 다른 주 스케줄 통째 불러오기 */}
+      {schedLoad && (
+        <div className="roster-modal-overlay" onClick={() => !schedBusy && setSchedLoad(null)}>
+          <div className="roster-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>📅 다른 주 스케줄 불러오기</h3>
+            <p>선택한 주의 <strong>인원·라우트·근무/휴무 전체</strong>를 현재 주({weekStartStr})로 복사합니다 (덮어쓰기).</p>
+            {schedLoad.length === 0 ? (
+              <div className="perm-empty">불러올 다른 주차가 없습니다.</div>
+            ) : (
+              <ul className="roster-week-list">
+                {schedLoad.map((r) => (
+                  <li key={r.id}>
+                    <button className="roster-week-btn" onClick={() => pickScheduleWeek(r)} disabled={schedBusy}>
+                      <span className="roster-week-date">{r.weekStart}</span>
+                      <span className="roster-week-src">{schedBusy ? '복사 중…' : ''}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="camp-add-actions">
+              <button className="camp-cancel-btn" onClick={() => setSchedLoad(null)} disabled={schedBusy}>닫기</button>
             </div>
           </div>
         </div>

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Worker, WorkerRole, Route, Camp, WeeklyRoster } from '../types';
 import { ROTATIONS_BY_WAVE } from '../types';
 import { pushHistory, markDirty } from './historyBridge';
+import { addDays, differenceInCalendarDays, parseISO, format } from 'date-fns';
 import * as db from '../lib/db';
 import {
   exportWorkersExcel,
@@ -69,6 +70,9 @@ interface WorkerState {
   clearWorkersSection: (role: WorkerRole) => Promise<void>;
   /** 현재 캠프·주차의 계약라우트 전체 삭제 (섹션 비우기) */
   clearRoutesSection: () => Promise<void>;
+  /** 다른 주차의 스케줄 전체(인원+라우트+근무/휴무 셀)를 현재 주차로 복사(덮어쓰기).
+   *  셀 날짜는 현재 주차 기준으로 요일을 유지한 채 이동. */
+  copyScheduleFromWeek: (sourceRosterId: string, sourceWeekStart: string) => Promise<void>;
 
   // ─── 조회 ────────────────────────────────────
   getWorkersByCamp: (campId: string) => Worker[];
@@ -346,6 +350,63 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
     const roster = await db.fetchRoster(currentCampId, currentWeekStart);
     if (!roster) return;
     await db.deleteRoutesByRoster(roster.id);
+    await get().loadCampWeek(currentCampId, currentWeekStart);
+    markDirty();
+  },
+
+  copyScheduleFromWeek: async (sourceRosterId, sourceWeekStart) => {
+    const { currentCampId, currentWeekStart } = get();
+    if (!currentCampId || !currentWeekStart) return;
+
+    // 1) source 인원/라우트
+    const [srcWorkers, srcRoutes] = await Promise.all([
+      db.fetchWorkersByRoster(sourceRosterId),
+      db.fetchRoutesByRoster(sourceRosterId),
+    ]);
+
+    // 2) 현재 주차 roster 확보 (있으면 비우기)
+    let roster = await db.fetchRoster(currentCampId, currentWeekStart);
+    if (!roster) {
+      roster = await db.createRoster({
+        campId: currentCampId,
+        weekStart: currentWeekStart,
+        source: `copied_from:${sourceRosterId}`,
+      });
+    } else {
+      await Promise.all([
+        db.deleteWorkersByRoster(roster.id),
+        db.deleteRoutesByRoster(roster.id),
+      ]);
+    }
+
+    // 3) 인원 복사 (새 id) + 구id→새id 매핑
+    const idMap = new Map<string, string>();
+    const copied: Worker[] = srcWorkers.map((w) => {
+      const nid = `w_${++idCounter}`;
+      idMap.set(w.id, nid);
+      return { ...w, id: nid, weeklyRosterId: roster!.id, campId: currentCampId };
+    });
+    await db.upsertWorkersBatch(copied);
+    await db.upsertRoutesBatch(roster.id, currentCampId, srcRoutes);
+
+    // 4) source 주의 셀 복사 — 담당자는 새 id로, 날짜는 요일 유지한 채 현재 주로 이동
+    const srcEnd = format(addDays(parseISO(sourceWeekStart), 6), 'yyyy-MM-dd');
+    const curEnd = format(addDays(parseISO(currentWeekStart), 6), 'yyyy-MM-dd');
+    const dayShift = differenceInCalendarDays(parseISO(currentWeekStart), parseISO(sourceWeekStart));
+    const srcCells = await db.fetchCellsByCamp(currentCampId, { start: sourceWeekStart, end: srcEnd });
+    const newCells = Object.values(srcCells)
+      .filter((c) => idMap.has(c.workerId))
+      .map((c) => ({
+        ...c,
+        workerId: idMap.get(c.workerId)!,
+        date: format(addDays(parseISO(c.date), dayShift), 'yyyy-MM-dd'),
+      }));
+
+    // 현재 주 기존 셀 비우고 새로 채움
+    await db.deleteCellsByCampRange(currentCampId, currentWeekStart, curEnd);
+    if (newCells.length) await db.upsertCellsBatch(newCells, currentCampId);
+
+    // 5) 새로고침
     await get().loadCampWeek(currentCampId, currentWeekStart);
     markDirty();
   },

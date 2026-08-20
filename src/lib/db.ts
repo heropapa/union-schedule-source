@@ -407,6 +407,17 @@ export async function deleteCell(workerId: string, date: string): Promise<void> 
   if (error) throw error;
 }
 
+/** 캠프의 날짜 구간 셀 전체 삭제 (스케줄 통째 불러오기 시 현재 주 비우기용). */
+export async function deleteCellsByCampRange(campId: string, start: string, end: string): Promise<void> {
+  const { error } = await supabase
+    .from('schedule_cells')
+    .delete()
+    .eq('camp_id', campId)
+    .gte('date', start)
+    .lte('date', end);
+  if (error) throw error;
+}
+
 // ─── Camp Locks (v1.1: 주차별) ──────────────────────────
 
 /** 현재 로그인 사용자의 표시 이름 (본인 profiles 행 — RLS 허용). 없으면 이메일 앞부분. */
