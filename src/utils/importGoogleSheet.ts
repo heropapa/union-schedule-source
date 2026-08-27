@@ -225,8 +225,77 @@ export async function importFromGoogleSheet(
 }
 
 /**
+ * 백업 블록만 붙여넣은 경우 해석:
+ *   각 줄 = [백업기사 이름, 일, 월, 화, 수, 목, 금, 토] (탭 구분, 날짜 헤더 없음)
+ *   - 라우트가 적힌 칸 → 그 백업기사 출근+배정
+ *   - 그 라우트의 원래 주인(고정인원, 라우트 전부 커버 시) → 자동 휴무
+ *   - '백업휴무자' 줄 이후의 이름 → 그 백업기사 휴무
+ */
+function parseBackupOnly(
+  grid: string[][],
+  ctx: { weekDates: string[]; workers: Worker[] },
+): { recs: DayRec[]; notes: ImportError[] } {
+  const recs: DayRec[] = [];
+  const notes: ImportError[] = [];
+  const coveredByDate = new Map<string, Set<string>>();  // date → 커버된 서브라우트
+  let mode: 'backup' | 'backupoff' = 'backup';
+
+  for (let r = 0; r < grid.length; r++) {
+    const row = grid[r] ?? [];
+    const label = trim(row[0]);
+    if (!label && row.every((c) => !trim(c))) continue;
+    if (label === '백업' || trim(row[1]) === '백업대상') continue;
+    if (label === '백업휴무자') { mode = 'backupoff'; continue; }
+    if (label === '휴무자' || parseKDate(label)) continue;   // 실수로 섞인 다른 블록 줄 무시
+
+    for (let d = 0; d < 7; d++) {
+      const date = ctx.weekDates[d];
+      const v = trim(row[d + 1]);
+      if (!v || isNA(v)) continue;
+      if (mode === 'backupoff') {
+        // 번호 줄: 칸 값 = 휴무자 이름
+        recs.push({ name: v, date, kind: 'off', routes: [], rowNum: r + 1 });
+      } else {
+        if (!label || isNA(label)) continue;
+        const routes = v.split(',').map((s) => s.trim()).filter(Boolean);
+        recs.push({ name: label, date, kind: 'work', routes, rowNum: r + 1 });
+        const set = coveredByDate.get(date) ?? new Set<string>();
+        routes.forEach((rt) => set.add(rt));
+        coveredByDate.set(date, set);
+      }
+    }
+  }
+
+  // 자동 휴무: 고정인원의 라우트가 그날 백업들로 전부 커버되면 휴무
+  const regularNames = new Set(recs.filter((x) => x.kind === 'work').map((x) => x.name));
+  for (const [date, covered] of coveredByDate) {
+    for (const w of ctx.workers) {
+      if (w.role !== 'regular' || w.assignedRoutes.length === 0) continue;
+      if (regularNames.has(w.name)) continue;            // 백업 블록에 직접 등장한 이름은 제외
+      const hit = w.assignedRoutes.filter((rt) => covered.has(rt));
+      if (hit.length === 0) continue;
+      if (hit.length === w.assignedRoutes.length) {
+        // 전부 커버 → 휴무
+        recs.push({ name: w.name, date, kind: 'off', routes: [], rowNum: 0 });
+      } else {
+        // 일부만 커버 → 남은 라우트로 근무 (중복 배정 방지)
+        const remain = w.assignedRoutes.filter((rt) => !covered.has(rt));
+        recs.push({ name: w.name, date, kind: 'work', routes: remain, rowNum: 0 });
+        notes.push({
+          row: 0,
+          reason: `${date.slice(5)} ${w.name}: ${hit.join(',')}는 백업이 커버 → 남은 ${remain.join(',')}만 근무 처리`,
+        });
+      }
+    }
+  }
+
+  return { recs, notes };
+}
+
+/**
  * 시트에서 복사해 붙여넣은 텍스트(탭 구분) → 현재 캠프·주차 셀 + 검증 리포트.
- * "휴무자 | 9월 6일 (일) | ..." 날짜 헤더가 포함된 블록을 그대로 붙여넣으면 됨.
+ * ① 날짜 헤더 포함 전체 블록("휴무자 | 9월 6일 (일) | ...") 또는
+ * ② 백업 블록만([백업기사, 일..토 라우트]) 붙여넣기 지원.
  */
 export function importFromPastedText(
   text: string,
@@ -236,13 +305,22 @@ export function importFromPastedText(
     .replace(/\r\n?/g, '\n')
     .split('\n')
     .map((line) => line.split('\t'));
+
+  // ① 날짜 헤더가 있으면 전체 블록 해석
   const { recs, found } = extractWeekRecords(grid, ctx.weekDates);
-  if (!found) {
+  if (found) return buildResult(recs, ctx.workers);
+
+  // ② 날짜 헤더가 없으면 백업 블록만으로 해석 (첫 칸=이름, 이후 7칸=일~토)
+  const { recs: brecs, notes } = parseBackupOnly(grid, ctx);
+  if (brecs.length === 0) {
     throw new Error(
-      `붙여넣은 내용에서 현재 주차(${ctx.weekDates[0]} 시작)의 날짜 헤더를 찾지 못했습니다.\n` +
-      `"휴무자 | 9월 6일 (일) | ..." 날짜 줄부터 백업휴무자 블록 끝까지 통째로 복사해 주세요.\n` +
-      `그리고 유스프가 그 주차 화면인지 확인하세요.`,
+      `붙여넣은 내용을 해석하지 못했습니다.\n` +
+      `- 전체 블록: "휴무자 | 9월 6일 (일) | ..." 날짜 줄부터 복사\n` +
+      `- 백업만: 백업기사 이름 줄부터 복사 (이름 + 요일별 라우트, 일~토 순)\n` +
+      `그리고 유스프가 맞는 주차 화면인지 확인하세요.`,
     );
   }
-  return buildResult(recs, ctx.workers);
+  const result = buildResult(brecs, ctx.workers);
+  result.errors.push(...notes);
+  return result;
 }
