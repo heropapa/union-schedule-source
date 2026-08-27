@@ -12,6 +12,8 @@ import { parseAdminExcel, matchImportRows } from './importAdminExcel';
 export interface ImportError {
   row: number;       // 엑셀 행 번호 (1-based)
   reason: string;
+  /** true면 '적용 불가'가 아니라 자동 조정 안내 (반영에 포함됨) */
+  info?: boolean;
 }
 
 export interface ScheduleImportResult {

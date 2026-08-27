@@ -1351,16 +1351,21 @@ export default function ScheduleCalendar() {
       {importReport && (
         <div className="roster-modal-overlay" onClick={() => setImportReport(null)}>
           <div className="roster-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>엑셀 업로드 — {importReport.format} 양식</h3>
+            <h3>가져오기 — {importReport.format} 양식</h3>
             <p>
-              적용 가능: <strong>{importReport.appliedCount}</strong>건
-              {importReport.errors.length > 0 && <> / 적용 불가: <strong>{importReport.errors.length}</strong>건</>}
+              적용: <strong>{importReport.appliedCount}</strong>건
+              {importReport.errors.filter((e) => !e.info).length > 0 && (
+                <> / 건너뜀: <strong>{importReport.errors.filter((e) => !e.info).length}</strong>건</>
+              )}
+              {importReport.errors.filter((e) => e.info).length > 0 && (
+                <> / 자동 조정: <strong style={{ color: '#1a5aa0' }}>{importReport.errors.filter((e) => e.info).length}</strong>건</>
+              )}
             </p>
             {importReport.errors.length > 0 && (
               <div className="import-error-list">
                 {importReport.errors.map((er, i) => (
-                  <div key={i} className="import-error-row">
-                    <span className="import-error-line">{er.row > 0 ? `${er.row}번째 줄` : 'ℹ 안내'}</span> — {er.reason}
+                  <div key={i} className="import-error-row" style={er.info ? { color: '#1a5aa0', borderColor: '#d5e3f5' } : undefined}>
+                    <span className="import-error-line">{er.info ? 'ℹ 자동 조정' : er.row > 0 ? `${er.row}번째 줄` : 'ℹ 안내'}</span> — {er.reason}
                   </div>
                 ))}
               </div>
