@@ -140,6 +140,22 @@ export default function ScheduleCalendar() {
   const [gsheetOpen, setGsheetOpen] = useState(false);
   const [gsheetUrl, setGsheetUrl] = useState(() => localStorage.getItem('usp-gsheet-url') ?? '');
   const [gsheetBusy, setGsheetBusy] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+
+  function runPasteImport() {
+    if (!pasteText.trim()) { alert('시트에서 복사한 내용을 붙여넣어 주세요.'); return; }
+    import('../../utils/importGoogleSheet').then(({ importFromPastedText }) => {
+      try {
+        const workers = [...regulars, ...backups];
+        const res = importFromPastedText(pasteText, { weekDates: store.weekDates, workers });
+        setGsheetOpen(false);
+        setPasteText('');
+        setImportReport(res);
+      } catch (err) {
+        alert(`붙여넣기 해석 실패\n\n${err instanceof Error ? err.message : JSON.stringify(err)}`);
+      }
+    });
+  }
 
   function openGsheet() {
     setShowExportMenu(false);
@@ -1380,23 +1396,40 @@ export default function ScheduleCalendar() {
           <div className="roster-modal" onClick={(e) => e.stopPropagation()}>
             <h3>🔗 구글시트 가져오기</h3>
             <p>
-              실무 스프레드시트의 <strong>출력화면 탭</strong>에서 <strong>지금 보고 있는 주차</strong>의
-              휴무/백업 배정을 바로 가져옵니다.
+              스프레드시트 <strong>출력화면</strong>의 <strong>지금 보고 있는 주차</strong> 블록을 가져옵니다.
+              (휴무자 → 휴무, 백업 라우트 → 출근 배정)
             </p>
+
             <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
-              구글시트 링크 <span style={{ color: '#999' }}>(출력화면 탭을 연 상태로 주소 전체 복사)</span>
+              방법 1 — 시트에서 복사해 붙여넣기 <span style={{ color: '#999' }}>(날짜 줄부터 백업휴무자 끝까지 드래그 복사)</span>
+            </label>
+            <textarea
+              className="add-input"
+              style={{ width: '100%', height: 110, marginBottom: 8, fontSize: 12, fontFamily: 'inherit' }}
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              placeholder={'휴무자\t9월 6일 (일)\t9월 7일 (월)\t...\n1\t권오현\t김명건\t...'}
+            />
+            <div className="camp-add-actions" style={{ marginBottom: 14 }}>
+              <button className="camp-save-btn" onClick={runPasteImport} disabled={gsheetBusy}>
+                붙여넣은 내용 가져오기
+              </button>
+            </div>
+
+            <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
+              방법 2 — 시트 링크로 자동 읽기
             </label>
             <input
               className="add-input"
-              style={{ width: '100%', marginBottom: 14 }}
+              style={{ width: '100%', marginBottom: 8 }}
               value={gsheetUrl}
               onChange={(e) => setGsheetUrl(e.target.value)}
-              placeholder="https://docs.google.com/spreadsheets/d/...#gid=..."
+              placeholder="https://docs.google.com/spreadsheets/d/..."
               onKeyDown={(e) => { if (e.key === 'Enter') runGsheetImport(); }}
             />
             <div className="camp-add-actions">
               <button className="camp-save-btn" onClick={runGsheetImport} disabled={gsheetBusy}>
-                {gsheetBusy ? '가져오는 중…' : '가져오기'}
+                {gsheetBusy ? '가져오는 중…' : '링크로 가져오기'}
               </button>
               <button className="camp-cancel-btn" onClick={() => setGsheetOpen(false)} disabled={gsheetBusy}>취소</button>
             </div>

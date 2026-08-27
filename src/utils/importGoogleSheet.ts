@@ -159,26 +159,15 @@ function extractWeekRecords(rows: string[][], weekDates: string[]): { recs: DayR
   return { recs: [], found: false };
 }
 
-/** 구글시트(출력화면 탭) → 현재 캠프·주차 셀 + 검증 리포트 */
-export async function importFromGoogleSheet(
-  sheetId: string,
-  gid: string,
-  ctx: { campId: string; campName: string; weekDates: string[]; workers: Worker[] },
-): Promise<ScheduleImportResult> {
-  const csv = await fetchSheetTabCsv(sheetId, gid);
-  const grid = parseCsv(csv);
-  const { recs, found } = extractWeekRecords(grid, ctx.weekDates);
-
-  if (!found) {
-    throw new Error(
-      `시트에서 현재 주차(${ctx.weekDates[0]} 시작) 블록을 찾지 못했습니다.\n` +
-      `출력화면 탭 주소(#gid= 포함)가 맞는지, 그 주차가 시트에 있는지 확인하세요.`,
-    );
-  }
+/** 추출된 기록 → 셀 + 리포트 (매칭 공통부) */
+function buildResult(
+  recs: DayRec[],
+  workers: Worker[],
+): ScheduleImportResult {
 
   // 이름 매칭 (동명이인은 오류로)
   const byName = new Map<string, Worker[]>();
-  for (const w of ctx.workers) {
+  for (const w of workers) {
     const l = byName.get(w.name) ?? []; l.push(w); byName.set(w.name, l);
   }
 
@@ -215,4 +204,45 @@ export async function importFromGoogleSheet(
   // 근무를 먼저, 휴무를 나중에 적용 (같은 사람·날짜가 겹치면 휴무 우선)
   const applicable = [...work, ...off];
   return { applicable, errors, appliedCount: applicable.length, format: '구글시트' };
+}
+
+/** 구글시트(출력화면 탭) 링크 → 현재 캠프·주차 셀 + 검증 리포트 */
+export async function importFromGoogleSheet(
+  sheetId: string,
+  gid: string,
+  ctx: { campId: string; campName: string; weekDates: string[]; workers: Worker[] },
+): Promise<ScheduleImportResult> {
+  const csv = await fetchSheetTabCsv(sheetId, gid);
+  const grid = parseCsv(csv);
+  const { recs, found } = extractWeekRecords(grid, ctx.weekDates);
+  if (!found) {
+    throw new Error(
+      `시트에서 현재 주차(${ctx.weekDates[0]} 시작) 블록을 찾지 못했습니다.\n` +
+      `출력화면 탭이 맞는지, 그 주차가 시트에 있는지 확인하세요.`,
+    );
+  }
+  return buildResult(recs, ctx.workers);
+}
+
+/**
+ * 시트에서 복사해 붙여넣은 텍스트(탭 구분) → 현재 캠프·주차 셀 + 검증 리포트.
+ * "휴무자 | 9월 6일 (일) | ..." 날짜 헤더가 포함된 블록을 그대로 붙여넣으면 됨.
+ */
+export function importFromPastedText(
+  text: string,
+  ctx: { weekDates: string[]; workers: Worker[] },
+): ScheduleImportResult {
+  const grid = text
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.split('\t'));
+  const { recs, found } = extractWeekRecords(grid, ctx.weekDates);
+  if (!found) {
+    throw new Error(
+      `붙여넣은 내용에서 현재 주차(${ctx.weekDates[0]} 시작)의 날짜 헤더를 찾지 못했습니다.\n` +
+      `"휴무자 | 9월 6일 (일) | ..." 날짜 줄부터 백업휴무자 블록 끝까지 통째로 복사해 주세요.\n` +
+      `그리고 유스프가 그 주차 화면인지 확인하세요.`,
+    );
+  }
+  return buildResult(recs, ctx.workers);
 }
