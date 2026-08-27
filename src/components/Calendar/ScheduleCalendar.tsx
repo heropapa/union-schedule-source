@@ -136,6 +136,51 @@ export default function ScheduleCalendar() {
     setImportReport(null);
   }
 
+  // ── 구글시트 가져오기 ──
+  const [gsheetOpen, setGsheetOpen] = useState(false);
+  const [gsheetUrl, setGsheetUrl] = useState(() => localStorage.getItem('usp-gsheet-url') ?? '');
+  const [gsheetName, setGsheetName] = useState(() => localStorage.getItem('usp-gsheet-name') ?? '어드민변환');
+  const [gsheetBusy, setGsheetBusy] = useState(false);
+
+  function openGsheet() {
+    setShowExportMenu(false);
+    if (!canEdit) {
+      alert(!hasCampPermission
+        ? '이 캠프에 대한 편집 권한이 없습니다.'
+        : lockStatus === 'viewing'
+          ? "보기 전용입니다. 상단 '🔒 편집 시작'을 먼저 누르세요."
+          : '잠금 획득 전입니다. 잠시 후 다시 시도해주세요.');
+      return;
+    }
+    setGsheetOpen(true);
+  }
+
+  async function runGsheetImport() {
+    const { extractSheetId, importFromGoogleSheet } = await import('../../utils/importGoogleSheet');
+    const id = extractSheetId(gsheetUrl.trim());
+    if (!id) { alert('구글시트 링크가 올바르지 않습니다. 시트 주소 전체를 붙여넣어 주세요.'); return; }
+    setGsheetBusy(true);
+    try {
+      localStorage.setItem('usp-gsheet-url', gsheetUrl.trim());
+      localStorage.setItem('usp-gsheet-name', gsheetName.trim());
+      const workers = [...regulars, ...backups];
+      const campName = camps.find((c) => c.id === store.selectedCampId)?.name ?? store.selectedCampId;
+      const res = await importFromGoogleSheet(id, gsheetName.trim(), {
+        campId: store.selectedCampId,
+        campName,
+        weekDates: store.weekDates,
+        workers,
+      });
+      setGsheetOpen(false);
+      setImportReport(res);
+    } catch (err) {
+      console.error('구글시트 가져오기 실패:', err);
+      alert(`구글시트 가져오기 실패\n\n${err instanceof Error ? err.message : JSON.stringify(err)}`);
+    } finally {
+      setGsheetBusy(false);
+    }
+  }
+
   // 토스트 메시지
   const [toast, setToast] = useState<string | null>(null);
   useEffect(() => {
@@ -982,6 +1027,9 @@ export default function ScheduleCalendar() {
                 <button onClick={() => triggerImport('어드민')}>
                   &#x2B06; 어드민 양식 업로드
                 </button>
+                <button onClick={openGsheet}>
+                  &#x1F517; 구글시트 가져오기
+                </button>
                 <hr className="export-divider" />
                 <button onClick={() => {
                   setShowExportMenu(false);
@@ -1257,7 +1305,7 @@ export default function ScheduleCalendar() {
               <div className="import-error-list">
                 {importReport.errors.map((er, i) => (
                   <div key={i} className="import-error-row">
-                    <span className="import-error-line">{er.row}번째 줄</span> — {er.reason}
+                    <span className="import-error-line">{er.row > 0 ? `${er.row}번째 줄` : 'ℹ 안내'}</span> — {er.reason}
                   </div>
                 ))}
               </div>
@@ -1317,6 +1365,44 @@ export default function ScheduleCalendar() {
             )}
             <div className="camp-add-actions">
               <button className="camp-cancel-btn" onClick={() => setSchedLoad(null)} disabled={schedBusy}>닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 구글시트 가져오기 */}
+      {gsheetOpen && (
+        <div className="roster-modal-overlay" onClick={() => !gsheetBusy && setGsheetOpen(false)}>
+          <div className="roster-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>🔗 구글시트 가져오기</h3>
+            <p>
+              실무 스프레드시트에서 <strong>현재 캠프·현재 주차</strong> 스케줄을 바로 가져옵니다.
+              (시트의 어드민 양식 컬럼을 자동 인식)
+            </p>
+            <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>구글시트 링크</label>
+            <input
+              className="add-input"
+              style={{ width: '100%', marginBottom: 10 }}
+              value={gsheetUrl}
+              onChange={(e) => setGsheetUrl(e.target.value)}
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+            />
+            <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
+              시트 이름 <span style={{ color: '#999' }}>(어드민 양식 컬럼이 있는 탭 이름 — 비우면 첫 시트)</span>
+            </label>
+            <input
+              className="add-input"
+              style={{ width: '100%', marginBottom: 14 }}
+              value={gsheetName}
+              onChange={(e) => setGsheetName(e.target.value)}
+              placeholder="예: 어드민"
+              onKeyDown={(e) => { if (e.key === 'Enter') runGsheetImport(); }}
+            />
+            <div className="camp-add-actions">
+              <button className="camp-save-btn" onClick={runGsheetImport} disabled={gsheetBusy}>
+                {gsheetBusy ? '가져오는 중…' : '가져오기'}
+              </button>
+              <button className="camp-cancel-btn" onClick={() => setGsheetOpen(false)} disabled={gsheetBusy}>취소</button>
             </div>
           </div>
         </div>
