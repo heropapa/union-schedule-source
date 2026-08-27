@@ -275,11 +275,15 @@ function parseBackupOnly(
       const hit = w.assignedRoutes.filter((rt) => covered.has(rt));
       if (hit.length === 0) continue;
       if (hit.length === w.assignedRoutes.length) {
+        // 전부 커버 → 휴무
         recs.push({ name: w.name, date, kind: 'off', routes: [], rowNum: 0 });
       } else {
+        // 일부만 커버 → 남은 라우트로 근무 (중복 배정 방지)
+        const remain = w.assignedRoutes.filter((rt) => !covered.has(rt));
+        recs.push({ name: w.name, date, kind: 'work', routes: remain, rowNum: 0 });
         notes.push({
           row: 0,
-          reason: `${date.slice(5)} ${w.name}: 라우트 일부(${hit.join(',')})만 백업 커버 — 자동 휴무 안 함, 직접 확인`,
+          reason: `${date.slice(5)} ${w.name}: ${hit.join(',')}는 백업이 커버 → 남은 ${remain.join(',')}만 근무 처리`,
         });
       }
     }
