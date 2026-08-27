@@ -291,7 +291,8 @@ export default function ScheduleCalendar() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      // e.code 기준: 한글 입력 상태(Ctrl+ㄴ)에서도 Ctrl+S로 인식되게
+      if ((e.ctrlKey || e.metaKey) && (e.code === 'KeyS' || e.key === 's' || e.key === 'S' || e.key === 'ㄴ')) {
         e.preventDefault();
         handleSave();
       }
