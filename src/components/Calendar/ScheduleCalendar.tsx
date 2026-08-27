@@ -201,6 +201,37 @@ export default function ScheduleCalendar() {
     }
   }
 
+  // ── 이번 주 스케줄 비우기 (셀만 초기화, 인원/라우트 유지) ──
+  async function clearWeekSchedule() {
+    setShowExportMenu(false);
+    if (!canEdit) {
+      alert(lockStatus === 'viewing'
+        ? "보기 전용입니다. 상단 '🔒 편집 시작'을 먼저 누르세요."
+        : '편집 권한/잠금이 필요합니다.');
+      return;
+    }
+    if (!confirm('이번 주 스케줄(근무/휴무 배정)을 모두 비우고 처음부터 짜시겠습니까?\n인원과 라우트는 그대로 유지됩니다.')) return;
+    const campId = store.selectedCampId;
+    const start = store.weekDates[0];
+    const end = store.weekDates[6];
+    try {
+      await db.deleteCellsByCampRange(campId, start, end);
+      // 로컬 셀도 이번 주 범위 제거
+      const workerIds = new Set([...regulars, ...backups].map((w) => w.id));
+      const weekSet = new Set(store.weekDates);
+      const next = { ...useScheduleStore.getState().cells };
+      for (const key of Object.keys(next)) {
+        const [wid, date] = key.split('::');
+        if (workerIds.has(wid) && weekSet.has(date)) delete next[key];
+      }
+      useScheduleStore.setState({ cells: next });
+      useHistoryStore.getState().setDirty(false);
+      setToast('이번 주 스케줄을 비웠습니다 — 처음부터 짜세요');
+    } catch (err) {
+      alert(`스케줄 비우기 실패\n\n${err instanceof Error ? err.message : JSON.stringify(err)}`);
+    }
+  }
+
   // 토스트 메시지
   const [toast, setToast] = useState<string | null>(null);
   useEffect(() => {
@@ -1049,6 +1080,10 @@ export default function ScheduleCalendar() {
                 </button>
                 <button onClick={openGsheet}>
                   &#x1F517; 구글시트 가져오기
+                </button>
+                <hr className="export-divider" />
+                <button onClick={clearWeekSchedule} style={{ color: '#b3261e' }}>
+                  &#x1F5D1; 이번 주 스케줄 비우기
                 </button>
                 <hr className="export-divider" />
                 <button onClick={() => {
