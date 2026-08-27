@@ -18,7 +18,7 @@ export interface ScheduleImportResult {
   applicable: ScheduleCell[];   // 적용 가능한 셀
   errors: ImportError[];        // 적용 불가 행 + 사유
   appliedCount: number;         // = applicable.length
-  format: '일반' | '어드민';
+  format: '일반' | '어드민' | '구글시트';
 }
 
 function str(v: unknown): string {

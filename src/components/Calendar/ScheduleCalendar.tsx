@@ -139,7 +139,6 @@ export default function ScheduleCalendar() {
   // ── 구글시트 가져오기 ──
   const [gsheetOpen, setGsheetOpen] = useState(false);
   const [gsheetUrl, setGsheetUrl] = useState(() => localStorage.getItem('usp-gsheet-url') ?? '');
-  const [gsheetName, setGsheetName] = useState(() => localStorage.getItem('usp-gsheet-name') ?? '어드민변환');
   const [gsheetBusy, setGsheetBusy] = useState(false);
 
   function openGsheet() {
@@ -156,16 +155,21 @@ export default function ScheduleCalendar() {
   }
 
   async function runGsheetImport() {
-    const { extractSheetId, importFromGoogleSheet } = await import('../../utils/importGoogleSheet');
-    const id = extractSheetId(gsheetUrl.trim());
+    const { extractSheetId, extractGid, importFromGoogleSheet } = await import('../../utils/importGoogleSheet');
+    const url = gsheetUrl.trim();
+    const id = extractSheetId(url);
     if (!id) { alert('구글시트 링크가 올바르지 않습니다. 시트 주소 전체를 붙여넣어 주세요.'); return; }
+    const gid = extractGid(url);
+    if (!gid) {
+      alert("주소에 탭 정보(#gid=숫자)가 없습니다.\n구글시트에서 '출력화면' 탭을 연 상태로 주소창의 주소 전체를 복사해 붙여넣어 주세요.");
+      return;
+    }
     setGsheetBusy(true);
     try {
-      localStorage.setItem('usp-gsheet-url', gsheetUrl.trim());
-      localStorage.setItem('usp-gsheet-name', gsheetName.trim());
+      localStorage.setItem('usp-gsheet-url', url);
       const workers = [...regulars, ...backups];
       const campName = camps.find((c) => c.id === store.selectedCampId)?.name ?? store.selectedCampId;
-      const res = await importFromGoogleSheet(id, gsheetName.trim(), {
+      const res = await importFromGoogleSheet(id, gid, {
         campId: store.selectedCampId,
         campName,
         weekDates: store.weekDates,
@@ -1376,26 +1380,18 @@ export default function ScheduleCalendar() {
           <div className="roster-modal" onClick={(e) => e.stopPropagation()}>
             <h3>🔗 구글시트 가져오기</h3>
             <p>
-              실무 스프레드시트에서 <strong>현재 캠프·현재 주차</strong> 스케줄을 바로 가져옵니다.
-              (시트의 어드민 양식 컬럼을 자동 인식)
+              실무 스프레드시트의 <strong>출력화면 탭</strong>에서 <strong>지금 보고 있는 주차</strong>의
+              휴무/백업 배정을 바로 가져옵니다.
             </p>
-            <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>구글시트 링크</label>
-            <input
-              className="add-input"
-              style={{ width: '100%', marginBottom: 10 }}
-              value={gsheetUrl}
-              onChange={(e) => setGsheetUrl(e.target.value)}
-              placeholder="https://docs.google.com/spreadsheets/d/..."
-            />
             <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
-              시트 이름 <span style={{ color: '#999' }}>(어드민 양식 컬럼이 있는 탭 이름 — 비우면 첫 시트)</span>
+              구글시트 링크 <span style={{ color: '#999' }}>(출력화면 탭을 연 상태로 주소 전체 복사)</span>
             </label>
             <input
               className="add-input"
               style={{ width: '100%', marginBottom: 14 }}
-              value={gsheetName}
-              onChange={(e) => setGsheetName(e.target.value)}
-              placeholder="예: 어드민"
+              value={gsheetUrl}
+              onChange={(e) => setGsheetUrl(e.target.value)}
+              placeholder="https://docs.google.com/spreadsheets/d/...#gid=..."
               onKeyDown={(e) => { if (e.key === 'Enter') runGsheetImport(); }}
             />
             <div className="camp-add-actions">
