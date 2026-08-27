@@ -29,6 +29,17 @@ export function extractGid(url: string): string | null {
   return m ? m[1] : null;
 }
 
+/** 알려진 시트의 출력화면 탭 gid (주소에 #gid가 없을 때 자동 사용) */
+const KNOWN_OUTPUT_GIDS: Record<string, string> = {
+  // 부산2 실무 스프레드시트 → 출력화면 탭
+  '19Tfd6xrl6igHQQL3G7Nj0NdKxHaxTadOUfPxML20oNs': '780158230',
+};
+
+/** 주소에서 gid를 찾고, 없으면 알려진 출력화면 탭 gid로 대체 */
+export function resolveGid(url: string, sheetId: string): string | null {
+  return extractGid(url) ?? KNOWN_OUTPUT_GIDS[sheetId] ?? null;
+}
+
 /** 간단 CSV 파서 (따옴표/줄바꿈 처리) */
 function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
