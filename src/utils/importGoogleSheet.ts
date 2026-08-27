@@ -1,17 +1,31 @@
 /**
- * 구글시트에서 스케쥴 직접 가져오기.
+ * 구글시트 "출력화면" 탭에서 스케쥴 직접 가져오기.
  *
- * 실무 스프레드시트에 이미 어드민 양식 컬럼(업무일|캠프명|웨이브|아이디|업무상태|회전|업무라우트)이
- * 있으므로, 링크 공유된 시트를 gviz CSV로 읽어 그 블록을 찾아 현재 캠프·주차 행만 적용한다.
- * 검증/리포트는 기존 어드민 업로드 파이프라인(matchImportRows)을 재사용.
+ * 출력화면 구조 (주차 블록이 세로로 반복):
+ *   [X Week]
+ *   휴무자 | 8월16일(일) | ... | 8월22일(토)     ← 날짜 헤더
+ *   1..11  | 이름들                              ← 그 요일 휴무자
+ *   백업   | 백업대상 ...
+ *   박건상 | 516A,516B | ...                     ← 백업기사가 그 요일 뛰는 라우트(빈칸=미투입)
+ *   백업휴무자
+ *   1..5   | 이름들                              ← 백업기사 휴무
+ *
+ * 유스프에서 보고 있는 주차와 날짜(월/일)가 일치하는 블록만 골라 적용.
+ * 시트는 "링크가 있는 모든 사용자 보기" 공유 + 출력화면 탭을 연 상태의
+ * 주소(#gid=숫자 포함)를 사용.
  */
 import type { ScheduleCell, Worker, CellStatus } from '../types';
-import { matchImportRows, type ImportRow } from './importAdminExcel';
 import type { ScheduleImportResult, ImportError } from './importScheduleExcel';
 
 /** 구글시트 URL → 시트 ID */
 export function extractSheetId(url: string): string | null {
   const m = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  return m ? m[1] : null;
+}
+
+/** 구글시트 URL → 탭 gid (#gid=... 또는 ?gid=...) */
+export function extractGid(url: string): string | null {
+  const m = url.match(/[#?&]gid=(\d+)/);
   return m ? m[1] : null;
 }
 
@@ -45,132 +59,149 @@ function parseCsv(text: string): string[][] {
 }
 
 const trim = (v: string | undefined) => (v ?? '').trim();
-const splitList = (v: string | undefined) =>
-  trim(v).split(',').map((s) => s.trim()).filter(Boolean);
+const isNA = (v: string) => v.includes('N/A');
 
-/** 'yyyy-mm-dd' 정규화 (2026-08-16, 2026.8.16, 2026/08/16 허용) */
-function normDate(v: string): string | null {
-  const m = trim(v).match(/(\d{4})[./-](\d{1,2})[./-](\d{1,2})/);
+/** '8월 16일 (일)' → { m: 8, d: 16 } */
+function parseKDate(v: string): { m: number; d: number } | null {
+  const m = trim(v).match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
   if (!m) return null;
-  return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  return { m: parseInt(m[1], 10), d: parseInt(m[2], 10) };
 }
 
-/**
- * 시트 CSV 전체에서 어드민 양식 블록들을 찾아 ImportRow[] 로.
- * 헤더 행에 '업무일'과 '아이디'가 함께 있는 컬럼 그룹을 블록으로 인식.
- * (한 행에 A/B/C/D주 블록이 옆으로 여러 개 있어도 모두 처리)
- */
-function extractAdminRows(rows: string[][]): ImportRow[] {
-  const out: ImportRow[] = [];
-  // 헤더 행 찾기: '사업자등록번호'(또는 '업무일')가 들어있는 행.
-  // (gviz CSV는 '업무일' 헤더 칸을 비워버리는 경우가 있어 '사업자등록번호' 기준으로 블록 인식,
-  //  업무일 컬럼은 그 바로 왼쪽 칸으로 잡는다)
-  for (let hr = 0; hr < rows.length; hr++) {
-    const header = rows[hr];
-    const anchors: { idx: number; kind: 'biz' | 'date' }[] = [];
-    header.forEach((c, i) => {
-      const h = trim(c);
-      if (h === '사업자등록번호') anchors.push({ idx: i, kind: 'biz' });
-      else if (h === '업무일') anchors.push({ idx: i, kind: 'date' });
-    });
-    if (anchors.length === 0) continue;
-
-    // '업무일'과 '사업자등록번호'가 나란히 있으면 같은 블록 — biz 기준으로 중복 제거
-    const bizAnchors = anchors.filter((a) => a.kind === 'biz');
-    const blocks = bizAnchors.length > 0
-      ? bizAnchors.map((a) => ({ dateCol: trim(header[a.idx - 1]) === '업무일' || trim(header[a.idx - 1]) === '' ? a.idx - 1 : a.idx - 1, start: a.idx }))
-      : anchors.map((a) => ({ dateCol: a.idx, start: a.idx + 1 }));
-
-    for (const b of blocks) {
-      const col: Record<string, number> = {};
-      for (let i = b.start; i < Math.min(b.start + 10, header.length); i++) {
-        const h = trim(header[i]);
-        if (h && col[h] === undefined) col[h] = i;
-      }
-      if (col['아이디'] === undefined && col['이름'] === undefined) continue;
-
-      for (let r = hr + 1; r < rows.length; r++) {
-        const row = rows[r];
-        if (!row) continue;
-        const date = normDate(row[b.dateCol] ?? '');
-        if (!date) continue;
-        const name = trim(row[col['이름'] ?? -1]);
-        const loginId = trim(row[col['아이디'] ?? -1]);
-        if ((!name || name === '0') && (!loginId || loginId.includes('N/A'))) continue;
-        out.push({
-          rowNum: r + 1,
-          date,
-          campName: trim(row[col['캠프명'] ?? -1]),
-          wave: trim(row[col['웨이브'] ?? -1]),
-          name: name === '0' ? '' : name,
-          loginId: loginId.includes('N/A') ? '' : loginId,
-          status: trim(row[col['업무상태'] ?? -1]) || '출근',
-          rotations: splitList(row[col['회전'] ?? -1]),
-          routes: splitList(row[col['업무라우트'] ?? -1]),
-        });
-      }
-    }
-  }
-  return out;
-}
-
-/** 링크 공유된 구글시트에서 CSV 가져오기 (gviz). sheetName 생략 시 첫 시트. */
-export async function fetchGoogleSheetCsv(sheetId: string, sheetName?: string): Promise<string> {
-  const base = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
-  const url = sheetName ? `${base}&sheet=${encodeURIComponent(sheetName)}` : base;
+/** 링크 공유된 시트의 특정 탭(gid) CSV — 원본 그대로(export) */
+export async function fetchSheetTabCsv(sheetId: string, gid: string): Promise<string> {
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`구글시트를 읽을 수 없습니다 (HTTP ${res.status}). 시트가 "링크가 있는 모든 사용자 보기"로 공유돼 있는지 확인하세요.`);
   }
   const text = await res.text();
   if (text.trimStart().startsWith('<')) {
-    throw new Error('구글시트 응답이 CSV가 아닙니다. 공유 설정(링크 보기 허용) 또는 시트 이름을 확인하세요.');
+    throw new Error('구글시트 응답이 CSV가 아닙니다. 공유 설정(링크 보기 허용)을 확인하세요.');
   }
   return text;
 }
 
-/** 구글시트 → 현재 캠프·주차 셀 + 검증 리포트 */
+type DayRec = { name: string; date: string; kind: 'off' | 'work'; routes: string[]; rowNum: number };
+
+/** 출력화면 그리드에서 현재 주차 블록을 찾아 휴무/백업투입 기록 추출 */
+function extractWeekRecords(rows: string[][], weekDates: string[]): { recs: DayRec[]; found: boolean } {
+  // 현재 주차의 (월,일) 시그니처
+  const wantMD = weekDates.map((d) => {
+    const [, m, dd] = d.split('-');
+    return `${parseInt(m, 10)}-${parseInt(dd, 10)}`;
+  });
+
+  for (let hr = 0; hr < rows.length; hr++) {
+    const header = rows[hr];
+    // 날짜 헤더 행: 한 행에 월/일 셀이 5개 이상
+    const dateCols: { col: number; md: string }[] = [];
+    header.forEach((c, i) => {
+      const kd = parseKDate(c);
+      if (kd) dateCols.push({ col: i, md: `${kd.m}-${kd.d}` });
+    });
+    if (dateCols.length < 5) continue;
+
+    // 이 블록이 현재 주차인지 (첫 날짜가 일요일과 일치 + 과반 일치)
+    const matchCnt = dateCols.filter((dc, i) => wantMD[i] === dc.md).length;
+    if (dateCols[0].md !== wantMD[0] || matchCnt < 5) continue;
+
+    const labelCol = Math.max(0, dateCols[0].col - 1);
+    // 날짜 컬럼 → 실제 yyyy-mm-dd
+    const colDate = new Map<number, string>();
+    dateCols.forEach((dc, i) => { if (weekDates[i]) colDate.set(dc.col, weekDates[i]); });
+
+    const recs: DayRec[] = [];
+    let mode: 'off' | 'backup' | 'backupoff' = 'off';
+
+    for (let r = hr + 1; r < rows.length; r++) {
+      const row = rows[r] ?? [];
+      // 다음 블록의 날짜 헤더를 만나면 종료
+      const nextDates = row.filter((c) => parseKDate(c)).length;
+      if (nextDates >= 5) break;
+
+      const label = trim(row[labelCol]);
+      if (label === '백업') { mode = 'backup'; continue; }
+      if (label === '백업휴무자') { mode = 'backupoff'; continue; }
+      if (/week/i.test(label)) continue;
+
+      if (mode === 'backup') {
+        // 라벨 = 백업기사 이름, 날짜칸 = 그날 뛰는 라우트
+        if (!label || isNA(label)) continue;
+        for (const [col, date] of colDate) {
+          const v = trim(row[col]);
+          if (!v || isNA(v) || v === '백업대상') continue;
+          const routes = v.split(',').map((s) => s.trim()).filter(Boolean);
+          recs.push({ name: label, date, kind: 'work', routes, rowNum: r + 1 });
+        }
+      } else {
+        // off / backupoff: 날짜칸 = 그날 휴무자 이름
+        for (const [col, date] of colDate) {
+          const nm = trim(row[col]);
+          if (!nm || isNA(nm)) continue;
+          recs.push({ name: nm, date, kind: 'off', routes: [], rowNum: r + 1 });
+        }
+      }
+    }
+    return { recs, found: true };
+  }
+  return { recs: [], found: false };
+}
+
+/** 구글시트(출력화면 탭) → 현재 캠프·주차 셀 + 검증 리포트 */
 export async function importFromGoogleSheet(
   sheetId: string,
-  sheetName: string,
+  gid: string,
   ctx: { campId: string; campName: string; weekDates: string[]; workers: Worker[] },
 ): Promise<ScheduleImportResult> {
-  const csv = await fetchGoogleSheetCsv(sheetId, sheetName || undefined);
+  const csv = await fetchSheetTabCsv(sheetId, gid);
   const grid = parseCsv(csv);
-  const allRows = extractAdminRows(grid);
-  if (allRows.length === 0) {
-    throw new Error("시트에서 어드민 양식(업무일/아이디/업무상태 컬럼)을 찾지 못했습니다. 시트 이름이 맞는지 확인하세요.");
+  const { recs, found } = extractWeekRecords(grid, ctx.weekDates);
+
+  if (!found) {
+    throw new Error(
+      `시트에서 현재 주차(${ctx.weekDates[0]} 시작) 블록을 찾지 못했습니다.\n` +
+      `출력화면 탭 주소(#gid= 포함)가 맞는지, 그 주차가 시트에 있는지 확인하세요.`,
+    );
   }
 
-  // 현재 주차 행만 사용 (다른 주는 건수만 안내)
-  const weekSet = new Set(ctx.weekDates);
-  const inWeek = allRows.filter((r) => weekSet.has(r.date));
-  const skippedOtherWeeks = allRows.length - inWeek.length;
+  // 이름 매칭 (동명이인은 오류로)
+  const byName = new Map<string, Worker[]>();
+  for (const w of ctx.workers) {
+    const l = byName.get(w.name) ?? []; l.push(w); byName.set(w.name, l);
+  }
+
+  const work: ScheduleCell[] = [];
+  const off: ScheduleCell[] = [];
+  const unmatched = new Map<string, number>();   // 이름 → 첫 등장 행
+  const dupNames = new Set<string>();
+
+  for (const rec of recs) {
+    const cands = byName.get(rec.name);
+    if (!cands || cands.length === 0) {
+      if (!unmatched.has(rec.name)) unmatched.set(rec.name, rec.rowNum);
+      continue;
+    }
+    if (cands.length > 1) { dupNames.add(rec.name); continue; }
+    const w = cands[0];
+    const cell: ScheduleCell = {
+      workerId: w.id,
+      date: rec.date,
+      status: (rec.kind === 'off' ? 'off' : 'work') as CellStatus,
+      routes: rec.kind === 'off' ? [] : rec.routes,
+    };
+    (rec.kind === 'off' ? off : work).push(cell);
+  }
 
   const errors: ImportError[] = [];
-
-  // 캠프명 안전장치 (시트의 캠프명이 있고 현재 캠프와 다르면 거부)
-  const sheetCamp = inWeek.find((r) => r.campName)?.campName ?? '';
-  if (sheetCamp && ctx.campName && sheetCamp !== ctx.campName) {
-    return {
-      applicable: [],
-      errors: [{ row: 1, reason: `시트 캠프(${sheetCamp})가 현재 캠프(${ctx.campName})와 다릅니다.` }],
-      appliedCount: 0,
-      format: '어드민',
-    };
+  for (const [nm, rowNum] of unmatched) {
+    errors.push({ row: rowNum, reason: `유스프에 등록되지 않은 인원: "${nm}" — 이 인원 칸은 건너뜀` });
+  }
+  for (const nm of dupNames) {
+    errors.push({ row: 0, reason: `동명이인 "${nm}" — 구분 불가로 건너뜀` });
   }
 
-  const result = matchImportRows(inWeek, ctx.workers, ctx.campId);
-  const applicable: ScheduleCell[] = result.matched.map((m) => ({
-    workerId: m.worker.id,
-    date: m.row.date,
-    status: (m.row.status === '휴무' ? 'off' : 'work') as CellStatus,
-    routes: m.row.status === '휴무' ? [] : m.row.routes,
-  }));
-  errors.push(...result.mismatched.map((mm) => ({ row: mm.row.rowNum, reason: mm.reason })));
-  if (skippedOtherWeeks > 0) {
-    errors.push({ row: 0, reason: `현재 주차(${ctx.weekDates[0]}~) 밖 ${skippedOtherWeeks}행은 제외됨 (정상)` });
-  }
-
-  return { applicable, errors, appliedCount: applicable.length, format: '어드민' };
+  // 근무를 먼저, 휴무를 나중에 적용 (같은 사람·날짜가 겹치면 휴무 우선)
+  const applicable = [...work, ...off];
+  return { applicable, errors, appliedCount: applicable.length, format: '구글시트' };
 }
