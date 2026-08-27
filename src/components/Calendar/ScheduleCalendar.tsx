@@ -155,13 +155,13 @@ export default function ScheduleCalendar() {
   }
 
   async function runGsheetImport() {
-    const { extractSheetId, extractGid, importFromGoogleSheet } = await import('../../utils/importGoogleSheet');
+    const { extractSheetId, resolveGid, importFromGoogleSheet } = await import('../../utils/importGoogleSheet');
     const url = gsheetUrl.trim();
     const id = extractSheetId(url);
     if (!id) { alert('구글시트 링크가 올바르지 않습니다. 시트 주소 전체를 붙여넣어 주세요.'); return; }
-    const gid = extractGid(url);
+    const gid = resolveGid(url, id);
     if (!gid) {
-      alert("주소에 탭 정보(#gid=숫자)가 없습니다.\n구글시트에서 '출력화면' 탭을 연 상태로 주소창의 주소 전체를 복사해 붙여넣어 주세요.");
+      alert("어느 탭을 읽을지 알 수 없습니다.\n구글시트에서 '출력화면' 탭을 연 상태로 주소창의 주소 전체(#gid=숫자 포함)를 복사해 붙여넣어 주세요.");
       return;
     }
     setGsheetBusy(true);
