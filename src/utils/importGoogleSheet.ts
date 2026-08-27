@@ -266,25 +266,44 @@ function parseBackupOnly(
     }
   }
 
-  // 자동 휴무: 고정인원의 라우트가 그날 백업들로 전부 커버되면 휴무
-  const regularNames = new Set(recs.filter((x) => x.kind === 'work').map((x) => x.name));
+  // 자동 휴무 계산.
+  // 1단계: 커버된 라우트를 "통째로 딱 맞는 인원"(합승 가상 인원 포함)에게 먼저 소진 → 그 인원 휴무.
+  //   예: 백업이 713A,714D를 가면 가상 인원 "713A,714D"가 휴무 — 서태교(714A,714D)는 건드리지 않음.
+  //   라우트 수가 많은 인원부터 매칭해 합승 인원이 단일 인원보다 우선.
+  // 2단계: 그러고도 남는 라우트만 부분 커버로 처리 (남은 라우트로 근무).
+  const backupNames = new Set(recs.filter((x) => x.kind === 'work').map((x) => x.name));
+  const candidates = ctx.workers
+    .filter((w) => w.role === 'regular' && w.assignedRoutes.length > 0 && !backupNames.has(w.name))
+    .sort((a, b) => b.assignedRoutes.length - a.assignedRoutes.length);
+
   for (const [date, covered] of coveredByDate) {
-    for (const w of ctx.workers) {
-      if (w.role !== 'regular' || w.assignedRoutes.length === 0) continue;
-      if (regularNames.has(w.name)) continue;            // 백업 블록에 직접 등장한 이름은 제외
-      const hit = w.assignedRoutes.filter((rt) => covered.has(rt));
-      if (hit.length === 0) continue;
-      if (hit.length === w.assignedRoutes.length) {
-        // 전부 커버 → 휴무
+    const remaining = new Set(covered);
+    const offed = new Set<string>();
+
+    // 1단계: 전부 커버되는 인원 휴무 + 라우트 소진 (소진으로 새로 매칭 안 되게 반복 불필요 — 긴 것 우선 1회)
+    for (const w of candidates) {
+      if (offed.has(w.id)) continue;
+      if (w.assignedRoutes.every((rt) => remaining.has(rt))) {
         recs.push({ name: w.name, date, kind: 'off', routes: [], rowNum: 0 });
-      } else {
-        // 일부만 커버 → 남은 라우트로 근무 (중복 배정 방지)
-        const remain = w.assignedRoutes.filter((rt) => !covered.has(rt));
+        offed.add(w.id);
+        w.assignedRoutes.forEach((rt) => remaining.delete(rt));
+      }
+    }
+
+    // 2단계: 남은 커버 라우트에 걸리는 인원 → 남은 라우트로 근무
+    if (remaining.size > 0) {
+      for (const w of candidates) {
+        if (offed.has(w.id)) continue;
+        const hit = w.assignedRoutes.filter((rt) => remaining.has(rt));
+        if (hit.length === 0) continue;
+        const remain = w.assignedRoutes.filter((rt) => !remaining.has(rt));
         recs.push({ name: w.name, date, kind: 'work', routes: remain, rowNum: 0 });
         notes.push({
           row: 0,
-          reason: `${date.slice(5)} ${w.name}: ${hit.join(',')}는 백업이 커버 → 남은 ${remain.join(',')}만 근무 처리`,
+          info: true,
+          reason: `${date.slice(5)} ${w.name}: ${hit.join(',')}는 백업이 커버 → 칸을 비우고 ${remain.join(',')}만 배정 (반영에 포함됨)`,
         });
+        hit.forEach((rt) => remaining.delete(rt));
       }
     }
   }
