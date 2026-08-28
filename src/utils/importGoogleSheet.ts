@@ -93,7 +93,7 @@ export async function fetchSheetTabCsv(sheetId: string, gid: string): Promise<st
   return text;
 }
 
-type DayRec = { name: string; date: string; kind: 'off' | 'work'; routes: string[]; rowNum: number };
+type DayRec = { name: string; date: string; kind: 'off' | 'work' | 'custom'; routes: string[]; rowNum: number };
 
 /** 출력화면 그리드에서 현재 주차 블록을 찾아 휴무/백업투입 기록 추출 */
 function extractWeekRecords(rows: string[][], weekDates: string[]): { recs: DayRec[]; found: boolean } {
@@ -187,7 +187,7 @@ function buildResult(
     const cell: ScheduleCell = {
       workerId: w.id,
       date: rec.date,
-      status: (rec.kind === 'off' ? 'off' : 'work') as CellStatus,
+      status: rec.kind as CellStatus,
       routes: rec.kind === 'off' ? [] : rec.routes,
     };
     (rec.kind === 'off' ? off : work).push(cell);
@@ -297,7 +297,7 @@ function parseBackupOnly(
         const hit = w.assignedRoutes.filter((rt) => remaining.has(rt));
         if (hit.length === 0) continue;
         const remain = w.assignedRoutes.filter((rt) => !remaining.has(rt));
-        recs.push({ name: w.name, date, kind: 'work', routes: remain, rowNum: 0 });
+        recs.push({ name: w.name, date, kind: 'custom', routes: remain, rowNum: 0 });
         notes.push({
           row: 0,
           info: true,
