@@ -277,24 +277,45 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
     let roster = await db.fetchRoster(currentCampId, currentWeekStart);
     if (!roster) {
       roster = await db.createRoster({ campId: currentCampId, weekStart: currentWeekStart, source: 'excel' });
-    } else {
-      await db.deleteWorkersByRosterRole(roster.id, role);
     }
+    // 이름 기준 병합: 같은 이름은 id를 유지한 채 정보만 갱신해서
+    // 이미 짜놓은 스케줄 셀(worker_id 참조)이 끊어지지 않게 한다.
+    // 목록에서 빠진 이름만 삭제, 새 이름만 추가.
+    const existing = (await db.fetchWorkersByRoster(roster.id)).filter((w) => w.role === role);
+    const byName = new Map(existing.map((w) => [w.name, w]));
     const wave = camps.find((c) => c.id === currentCampId)?.wave ?? 'WAVE1';
     const defaultRotations = ROTATIONS_BY_WAVE[wave] ?? [];
-    const newWorkers: Worker[] = parsed.map((pw) => ({
-      id: `w_${++idCounter}`,
-      weeklyRosterId: roster!.id,
-      campId: currentCampId,
-      name: pw.name,
-      loginId: pw.loginId,
-      role,
-      assignedRoutes: pw.assignedRoutes,
-      rotations: pw.rotations.length > 0 ? pw.rotations : [...defaultRotations],
-      phone: pw.phone,
-      vehicle: pw.vehicle,
-      note: pw.note,
-    }));
+    const keepIds = new Set<string>();
+    const newWorkers: Worker[] = parsed.map((pw) => {
+      const ex = byName.get(pw.name);
+      if (ex) {
+        keepIds.add(ex.id);
+        return {
+          ...ex,
+          loginId: pw.loginId || ex.loginId,
+          assignedRoutes: pw.assignedRoutes,
+          rotations: pw.rotations.length > 0 ? pw.rotations : ex.rotations,
+          phone: pw.phone ?? ex.phone,
+          vehicle: pw.vehicle ?? ex.vehicle,
+          note: pw.note ?? ex.note,
+        };
+      }
+      return {
+        id: `w_${++idCounter}`,
+        weeklyRosterId: roster!.id,
+        campId: currentCampId,
+        name: pw.name,
+        loginId: pw.loginId,
+        role,
+        assignedRoutes: pw.assignedRoutes,
+        rotations: pw.rotations.length > 0 ? pw.rotations : [...defaultRotations],
+        phone: pw.phone,
+        vehicle: pw.vehicle,
+        note: pw.note,
+      };
+    });
+    const removed = existing.filter((w) => !keepIds.has(w.id));
+    await Promise.all(removed.map((w) => db.deleteWorker(w.id)));
     await Promise.all(newWorkers.map((w, i) => db.upsertWorker(w, i)));
     await get().loadCampWeek(currentCampId, currentWeekStart);
     markDirty();
