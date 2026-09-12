@@ -53,9 +53,19 @@ export function exportAdminExcel(opts: AdminExportOptions) {
 
       const cell = getEffectiveCell(w.id, date);
       const isWorking = cell && (cell.status === 'work' || cell.status === 'custom');
+      const isOff = cell && cell.status === 'off';
 
-      // 휴무일은 행에 포함하지 않음
-      if (!isWorking) continue;
+      // 휴무일도 행에 포함 (업무상태='휴무', 회전/라우트 빈칸) — 재업로드 시 휴무 복원용.
+      // 셀이 아예 없는 날(백업 미투입 등)만 제외.
+      if (!isWorking && !isOff) continue;
+
+      if (isOff) {
+        rows.push([
+          serial, config.vendorName, config.businessNumber, config.campName,
+          config.wave, w.name, w.loginId, '휴무', '', '',
+        ]);
+        continue;
+      }
 
       const rotationStr = (w.rotations ?? []).join(',');
 
