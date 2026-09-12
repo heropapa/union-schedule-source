@@ -131,8 +131,23 @@ export default function ScheduleCalendar() {
 
   function applyImportReport() {
     if (!importReport) return;
-    store.applyImportedCells(importReport.applicable);
-    setToast(`${importReport.appliedCount}건 반영됨 ✓ — 저장 버튼을 눌러 저장하세요`);
+    // 캠프 혼합 배정 차단: 한 셀에 서로 다른 캠프 라우트가 섞이면 그 셀은 제외
+    const ok: typeof importReport.applicable = [];
+    const blocked: string[] = [];
+    for (const c of importReport.applicable) {
+      const mixed = c.routes.length > 1 ? mixedCampLabels(c.routes) : null;
+      if (mixed) {
+        const nm = [...regulars, ...backups].find((w) => w.id === c.workerId)?.name ?? c.workerId;
+        blocked.push(`${c.date.slice(5)} ${nm} (${mixed.join('+')})`);
+      } else {
+        ok.push(c);
+      }
+    }
+    store.applyImportedCells(ok);
+    setToast(`${ok.length}건 반영됨 ✓ — 저장 버튼을 눌러 저장하세요`);
+    if (blocked.length) {
+      alert(`서로 다른 캠프 라우트가 한 칸에 섞인 ${blocked.length}건은 반영하지 않았습니다:\n${blocked.join('\n')}`);
+    }
     setImportReport(null);
   }
 
@@ -688,6 +703,24 @@ export default function ScheduleCalendar() {
   const displayRegulars = orderedRegulars;
   const displayBackups = orderedBackups;
 
+  /** 서브라우트 → 캠프명 매핑 (라우트별 캠프명 지정) */
+  function routeLabelMap(): Map<string, string> {
+    const m = new Map<string, string>();
+    for (const r of workerStore.routes[store.selectedCampId] ?? []) {
+      if (r.campLabel) for (const sr of r.subRoutes) m.set(sr, r.campLabel);
+    }
+    return m;
+  }
+
+  /** 한 셀의 라우트들이 서로 다른 캠프에 걸치면 그 캠프명 목록 반환 (아니면 null) */
+  function mixedCampLabels(routes: string[]): string[] | null {
+    const m = routeLabelMap();
+    if (m.size === 0) return null;
+    const currentName = camps.find((c) => c.id === store.selectedCampId)?.name ?? '현재 캠프';
+    const labels = new Set(routes.map((rt) => m.get(rt) ?? currentName));
+    return labels.size > 1 ? [...labels] : null;
+  }
+
   /** 편집 확정 */
   function commitEdit() {
     if (!editing) return;
@@ -695,6 +728,11 @@ export default function ScheduleCalendar() {
     const val = editValue.trim();
     if (val) {
       const routes = val.split(',').map((s) => s.trim()).filter(Boolean);
+      const mixed = mixedCampLabels(routes);
+      if (mixed) {
+        alert(`한 사람이 같은 날 서로 다른 캠프(${mixed.join(' + ')}) 라우트를 같이 갈 수 없습니다.\n한 캠프의 라우트만 배정해주세요.`);
+        return; // 입력창 유지 — 수정하도록
+      }
       const worker = [...regulars, ...backups].find((w) => w.id === editing.workerId);
       const status: CellStatus = worker?.role === 'backup' ? 'work' : 'custom';
       store.setCell(editing.workerId, editing.date, status, routes);
@@ -802,10 +840,17 @@ export default function ScheduleCalendar() {
     const newRoutes = dragging.routes.filter((r) => !existing.includes(r));
 
     if (newRoutes.length > 0) {
+      const combined = [...existing, ...newRoutes];
+      const mixed = mixedCampLabels(combined);
+      if (mixed) {
+        alert(`한 사람이 같은 날 서로 다른 캠프(${mixed.join(' + ')}) 라우트를 같이 갈 수 없습니다.`);
+        setDragging(null);
+        return;
+      }
       if (w.role === 'backup') {
-        store.setCell(w.id, date, 'work', [...existing, ...newRoutes]);
+        store.setCell(w.id, date, 'work', combined);
       } else {
-        store.setCell(w.id, date, 'custom', [...existing, ...newRoutes]);
+        store.setCell(w.id, date, 'custom', combined);
       }
     }
     setDragging(null);
