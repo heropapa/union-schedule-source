@@ -100,7 +100,7 @@ interface WorkerState {
   sortWorkers: (campId: string, by: 'name' | 'routes', dir: 'asc' | 'desc') => void;
 
   // ─── 라우트 CRUD ─────────────────────────────
-  addRoute: (campId: string, routeId: string, suffixes?: string[]) => void;
+  addRoute: (campId: string, routeId: string, suffixes?: string[], campLabel?: string) => void;
   removeRoute: (campId: string, routeId: string) => void;
   moveRoute: (campId: string, routeId: string, direction: 'up' | 'down') => void;
   updateRouteSubRoutes: (campId: string, routeId: string, subRoutes: string[]) => void;
@@ -693,7 +693,7 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
 
   // ─── 라우트 CRUD ─────────────────────────────
 
-  addRoute: (campId, routeId, suffixes) => {
+  addRoute: (campId, routeId, suffixes, campLabel) => {
     pushHistory();
     const { currentCampId, currentWeekStart, currentRoster } = get();
     if (campId !== currentCampId) {
@@ -702,7 +702,7 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
     }
 
     const subs = (suffixes || ['A', 'B', 'C', 'D']).map((s) => `${routeId}${s}`);
-    const newRoute: Route = { id: routeId, subRoutes: subs };
+    const newRoute: Route = { id: routeId, subRoutes: subs, campLabel: campLabel?.trim() || undefined };
 
     const doAdd = (rosterId: string) => {
       set((state) => {
