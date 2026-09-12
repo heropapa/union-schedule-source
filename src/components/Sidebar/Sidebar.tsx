@@ -95,6 +95,22 @@ function parseRouteInput(input: string): { routeId: string; suffixes: string[] }
  * "701A, 701B, 702A, 707ABC, 708" 같은 입력을 라우트번호별로 묶어
  * [{ routeId:'701', suffixes:['A','B'] }, ...] 로 반환 (순서 보존, 중복 제거).
  */
+/** 서브라우트 표시 요약: 701A,701B,701C → "ABCD"처럼 접미사만. 접두사가 다른 건 그대로. */
+function routeSuffixSummary(routeId: string, subRoutes: string[]): string {
+  if (subRoutes.length === 0) return '-';
+  const suffixes: string[] = [];
+  const others: string[] = [];
+  for (const sr of subRoutes) {
+    if (sr.startsWith(routeId) && sr.length > routeId.length) suffixes.push(sr.slice(routeId.length));
+    else if (sr === routeId) suffixes.push('');
+    else others.push(sr);
+  }
+  const parts: string[] = [];
+  if (suffixes.some((s) => s !== '')) parts.push(suffixes.join(''));
+  if (others.length) parts.push(others.join(', '));
+  return parts.length ? parts.join(' + ') : routeId;
+}
+
 function parseRouteList(input: string): { routeId: string; suffixes: string[] }[] {
   const tokens = input.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean);
   const order: string[] = [];
@@ -493,6 +509,26 @@ export default function Sidebar() {
   // ── 서브라우트 편집 ──
   const [editingSubRoutes, setEditingSubRoutes] = useState<{ routeId: string; value: string } | null>(null);
   const subRouteEditRef = useRef<HTMLInputElement>(null);
+
+  // ── 라우트 편집 (우클릭 패널) ──
+  const [editingRoute, setEditingRoute] = useState<{
+    id: string; subRoutes: string; campLabel: string;
+  } | null>(null);
+  const routeEditRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (editingRoute?.id) routeEditRef.current?.focus();
+  }, [editingRoute?.id]);
+
+  function commitEditRoute() {
+    if (!editingRoute) return;
+    const { id, subRoutes, campLabel } = editingRoute;
+    withCampPermission(() => {
+      const subs = subRoutes.split(',').map((s) => s.trim()).filter(Boolean);
+      store.updateRouteSubRoutes(selectedCampId, id, subs);
+      store.setRouteCampLabel(selectedCampId, id, campLabel);
+    });
+    setEditingRoute(null);
+  }
 
   useEffect(() => {
     if (addingType === 'route' && routeAddRef.current) routeAddRef.current.focus();
@@ -1159,50 +1195,88 @@ export default function Sidebar() {
               onDragEnd={routeDrag.onDragEnd}
               onDragLeave={routeDrag.onDragLeave}
             >
-              <span className="drag-handle" title="드래그하여 순서 변경">&#x2630;</span>
-              <span className="worker-name">{r.id}</span>
-              {r.campLabel && (
-                <span
-                  style={{ fontSize: 11, background: '#eef3fb', color: '#1a5aa0', border: '1px solid #c9dbf2', borderRadius: 4, padding: '0 4px', marginRight: 4, whiteSpace: 'nowrap' }}
-                  title={`이 라우트는 ${r.campLabel} 소속`}
-                >
-                  {r.campLabel}
-                </span>
-              )}
-              {editingSubRoutes?.routeId === r.id ? (
-                <input
-                  ref={subRouteEditRef}
-                  className="route-edit-input"
-                  value={editingSubRoutes.value}
-                  onChange={(e) => setEditingSubRoutes({ ...editingSubRoutes, value: e.target.value })}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') commitEditSubRoutes();
-                    if (e.key === 'Escape') setEditingSubRoutes(null);
-                  }}
-                  onBlur={commitEditSubRoutes}
-                  placeholder="서브라우트 (예: 701A, 701B)"
-                />
+              {editingRoute?.id === r.id ? (
+                <div className="worker-edit-form">
+                  <label>서브라우트
+                    <input
+                      ref={routeEditRef}
+                      className="add-input"
+                      value={editingRoute.subRoutes}
+                      onChange={(e) => setEditingRoute({ ...editingRoute, subRoutes: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') commitEditRoute();
+                        if (e.key === 'Escape') setEditingRoute(null);
+                      }}
+                      placeholder="예: 701A, 701B"
+                    />
+                  </label>
+                  <label>캠프명
+                    <input
+                      className="add-input"
+                      value={editingRoute.campLabel}
+                      onChange={(e) => setEditingRoute({ ...editingRoute, campLabel: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') commitEditRoute();
+                        if (e.key === 'Escape') setEditingRoute(null);
+                      }}
+                      placeholder="비우면 현재 캠프 (예: 부산3)"
+                    />
+                  </label>
+                  <div className="camp-add-actions">
+                    <button className="camp-save-btn" onClick={commitEditRoute}>저장</button>
+                    <button className="camp-cancel-btn" onClick={() => setEditingRoute(null)}>취소</button>
+                  </div>
+                </div>
               ) : (
-                <span
-                  className="worker-routes editable"
-                  onClick={() => startEditSubRoutes(r.id, r.subRoutes)}
-                  title="클릭하여 서브라우트 수정"
-                >
-                  {r.subRoutes.join(', ')}
-                </span>
+                <>
+                  <span className="drag-handle" title="드래그하여 순서 변경">&#x2630;</span>
+                  <span
+                    className="worker-name clickable"
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setEditingRoute({ id: r.id, subRoutes: r.subRoutes.join(', '), campLabel: r.campLabel ?? '' });
+                    }}
+                    title="우클릭: 서브라우트/캠프명 수정"
+                  >
+                    {r.id}
+                  </span>
+                  {editingSubRoutes?.routeId === r.id ? (
+                    <input
+                      ref={subRouteEditRef}
+                      className="route-edit-input"
+                      value={editingSubRoutes.value}
+                      onChange={(e) => setEditingSubRoutes({ ...editingSubRoutes, value: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') commitEditSubRoutes();
+                        if (e.key === 'Escape') setEditingSubRoutes(null);
+                      }}
+                      onBlur={commitEditSubRoutes}
+                      placeholder="서브라우트 (예: 701A, 701B)"
+                    />
+                  ) : (
+                    <span
+                      className="worker-routes editable"
+                      onClick={() => startEditSubRoutes(r.id, r.subRoutes)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setEditingRoute({ id: r.id, subRoutes: r.subRoutes.join(', '), campLabel: r.campLabel ?? '' });
+                      }}
+                      title={`${r.subRoutes.join(', ')}\n클릭: 서브라우트 수정 / 우클릭: 캠프명 포함 수정`}
+                    >
+                      {routeSuffixSummary(r.id, r.subRoutes)}
+                    </span>
+                  )}
+                  {r.campLabel && (
+                    <span
+                      style={{ fontSize: 11, background: '#eef3fb', color: '#1a5aa0', border: '1px solid #c9dbf2', borderRadius: 4, padding: '0 4px', marginLeft: 4, whiteSpace: 'nowrap' }}
+                      title={`이 라우트는 ${r.campLabel} 소속`}
+                    >
+                      {r.campLabel}
+                    </span>
+                  )}
+                  {<button className="remove-btn" onClick={() => withCampPermission(() => store.removeRoute(selectedCampId, r.id))} title="삭제">&times;</button>}
+                </>
               )}
-              {<button
-                className="remove-btn"
-                style={{ color: '#1a5aa0' }}
-                onClick={() => withCampPermission(() => {
-                  const cur = r.campLabel ?? '';
-                  const v = prompt(`"${r.id}" 라우트의 캠프명\n(예: 부산3 — 비우면 현재 캠프 소속)`, cur);
-                  if (v === null) return;
-                  store.setRouteCampLabel(selectedCampId, r.id, v);
-                })}
-                title="캠프명 지정 (부산2/부산3 함께 관리)"
-              >&#x1F3F7;</button>}
-              {<button className="remove-btn" onClick={() => withCampPermission(() => store.removeRoute(selectedCampId, r.id))} title="삭제">&times;</button>}
             </li>
           ))}
         </ul>
