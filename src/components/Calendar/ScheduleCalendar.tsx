@@ -121,6 +121,12 @@ export default function ScheduleCalendar() {
         campName,
         weekDates: store.weekDates,
         workers,
+        // 계약라우트에 등록된 캠프명(부산3 등)도 허용 — 통합 어드민 양식 업로드
+        allowedCampNames: Array.from(new Set(
+          (workerStore.routes[store.selectedCampId] ?? [])
+            .map((r) => r.campLabel)
+            .filter((l): l is string => !!l),
+        )),
       });
       setImportReport(res);
     } catch (err) {
