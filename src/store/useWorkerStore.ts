@@ -104,6 +104,8 @@ interface WorkerState {
   removeRoute: (campId: string, routeId: string) => void;
   moveRoute: (campId: string, routeId: string, direction: 'up' | 'down') => void;
   updateRouteSubRoutes: (campId: string, routeId: string, subRoutes: string[]) => void;
+  /** 라우트의 캠프명 변경 (빈 문자열 = 현재 캠프 소속으로 초기화) */
+  setRouteCampLabel: (campId: string, routeId: string, label: string) => void;
 }
 
 let idCounter = Date.now();
@@ -331,7 +333,7 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
       await db.deleteRoutesByRoster(roster.id);
     }
     await Promise.all(parsed.map((r, i) =>
-      db.upsertRoute(roster!.id, currentCampId, { id: r.routeId, subRoutes: r.subRoutes }, i),
+      db.upsertRoute(roster!.id, currentCampId, { id: r.routeId, subRoutes: r.subRoutes, campLabel: r.campLabel }, i),
     ));
     await get().loadCampWeek(currentCampId, currentWeekStart);
     markDirty();
@@ -352,7 +354,7 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
 
   copyRoutesFromWeek: async (sourceRosterId) => {
     const srcRoutes = await db.fetchRoutesByRoster(sourceRosterId);
-    await get().importRoutesSection(srcRoutes.map((r) => ({ routeId: r.id, subRoutes: r.subRoutes })));
+    await get().importRoutesSection(srcRoutes.map((r) => ({ routeId: r.id, subRoutes: r.subRoutes, campLabel: r.campLabel })));
   },
 
   clearWorkersSection: async (role) => {
@@ -764,6 +766,26 @@ export const useWorkerStore = create<WorkerState>()((set, get) => ({
       const idx = (get().routes[campId] ?? []).indexOf(route);
       db.upsertRoute(currentRoster.id, campId, route, idx)
         .catch(e => console.error('DB route update failed:', e));
+    }
+  },
+
+  setRouteCampLabel: (campId, routeId, label) => {
+    pushHistory();
+    const { currentRoster } = get();
+    if (!currentRoster) return;
+    set((state) => ({
+      routes: {
+        ...state.routes,
+        [campId]: (state.routes[campId] ?? []).map((r) =>
+          r.id === routeId ? { ...r, campLabel: label.trim() || undefined } : r,
+        ),
+      },
+    }));
+    const route = (get().routes[campId] ?? []).find(r => r.id === routeId);
+    if (route) {
+      const idx = (get().routes[campId] ?? []).indexOf(route);
+      db.upsertRoute(currentRoster.id, campId, route, idx)
+        .catch(e => console.error('DB route camp_label update failed:', e));
     }
   },
 

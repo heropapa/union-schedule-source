@@ -20,6 +20,8 @@ interface AdminExportOptions {
   regulars: Worker[];
   backups: Worker[];
   getEffectiveCell: (workerId: string, date: string) => { status: string; routes: SubRoute[] } | undefined;
+  /** 서브라우트 → 캠프명 (라우트별 캠프명 지정 시). 없으면 config.campName 사용 */
+  routeCampLabels?: Map<string, string>;
 }
 
 /** yyyy-mm-dd → Excel 시리얼 넘버 (쿠팡 어드민 요구 형식) */
@@ -55,22 +57,33 @@ export function exportAdminExcel(opts: AdminExportOptions) {
       // 휴무일은 행에 포함하지 않음
       if (!isWorking) continue;
 
-      const status = isWorking ? '출근' : '휴무';
-      const routeStr = isWorking ? cell!.routes.join(',') : '';
-      const rotationStr = isWorking ? (w.rotations ?? []).join(',') : '';
+      const rotationStr = (w.rotations ?? []).join(',');
 
-      rows.push([
-        serial,                  // 업무일 (Excel 시리얼 넘버)
-        config.vendorName,       // 벤더명
-        config.businessNumber,   // 사업자등록번호
-        config.campName,         // 캠프명
-        config.wave,             // 웨이브
-        w.name,                  // 이름
-        w.loginId,               // 아이디
-        status,                  // 업무상태
-        rotationStr,             // 회전
-        routeStr,                // 업무라우트
-      ]);
+      // 라우트별 캠프명 지정이 있으면 캠프명 그룹별로 행을 나눠 출력
+      // (부산2 화면에서 부산3 라우트를 함께 짜도 어드민 제출은 각 캠프명으로)
+      const byCamp = new Map<string, string[]>();
+      for (const rt of cell!.routes) {
+        const label = opts.routeCampLabels?.get(rt) ?? config.campName;
+        const list = byCamp.get(label) ?? [];
+        list.push(rt);
+        byCamp.set(label, list);
+      }
+      if (byCamp.size === 0) byCamp.set(config.campName, []);
+
+      for (const [campLabel, groupRoutes] of byCamp) {
+        rows.push([
+          serial,                  // 업무일 (Excel 시리얼 넘버)
+          config.vendorName,       // 벤더명
+          config.businessNumber,   // 사업자등록번호
+          campLabel,               // 캠프명 (라우트별 지정 반영)
+          config.wave,             // 웨이브
+          w.name,                  // 이름
+          w.loginId,               // 아이디
+          '출근',                  // 업무상태
+          rotationStr,             // 회전
+          groupRoutes.join(','),   // 업무라우트
+        ]);
+      }
     }
   }
 
