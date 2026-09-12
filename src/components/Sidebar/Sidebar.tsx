@@ -1161,6 +1161,14 @@ export default function Sidebar() {
             >
               <span className="drag-handle" title="드래그하여 순서 변경">&#x2630;</span>
               <span className="worker-name">{r.id}</span>
+              {r.campLabel && (
+                <span
+                  style={{ fontSize: 11, background: '#eef3fb', color: '#1a5aa0', border: '1px solid #c9dbf2', borderRadius: 4, padding: '0 4px', marginRight: 4, whiteSpace: 'nowrap' }}
+                  title={`이 라우트는 ${r.campLabel} 소속`}
+                >
+                  {r.campLabel}
+                </span>
+              )}
               {editingSubRoutes?.routeId === r.id ? (
                 <input
                   ref={subRouteEditRef}
@@ -1183,6 +1191,17 @@ export default function Sidebar() {
                   {r.subRoutes.join(', ')}
                 </span>
               )}
+              {<button
+                className="remove-btn"
+                style={{ color: '#1a5aa0' }}
+                onClick={() => withCampPermission(() => {
+                  const cur = r.campLabel ?? '';
+                  const v = prompt(`"${r.id}" 라우트의 캠프명\n(예: 부산3 — 비우면 현재 캠프 소속)`, cur);
+                  if (v === null) return;
+                  store.setRouteCampLabel(selectedCampId, r.id, v);
+                })}
+                title="캠프명 지정 (부산2/부산3 함께 관리)"
+              >&#x1F3F7;</button>}
               {<button className="remove-btn" onClick={() => withCampPermission(() => store.removeRoute(selectedCampId, r.id))} title="삭제">&times;</button>}
             </li>
           ))}

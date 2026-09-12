@@ -24,10 +24,11 @@ export interface ParsedRosterWorker {
 export interface ParsedRoute {
   routeId: string;
   subRoutes: string[];
+  campLabel?: string;
 }
 
 const WORKER_HEADER = ['이름', '아이디', '라우트', '회전', '비고'];
-const ROUTE_HEADER = ['라우트번호', '서브라우트'];
+const ROUTE_HEADER = ['라우트번호', '서브라우트', '캠프명'];
 
 /** 셀 값 → 문자열 */
 function str(v: unknown): string {
@@ -102,9 +103,9 @@ export async function exportRoutesExcel(
 ): Promise<void> {
   const XLSX = await import('xlsx');
   const rows: string[][] = [[...ROUTE_HEADER]];
-  for (const r of routes) rows.push([r.id, r.subRoutes.join(', ')]);
+  for (const r of routes) rows.push([r.id, r.subRoutes.join(', '), r.campLabel ?? '']);
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [{ wch: 12 }, { wch: 40 }];
+  ws['!cols'] = [{ wch: 12 }, { wch: 40 }, { wch: 12 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '계약라우트');
   XLSX.writeFile(wb, safeFile(`유스프_${campName}_계약라우트_${weekStart}.xlsx`));
@@ -120,7 +121,7 @@ export async function parseRoutesExcel(buffer: ArrayBuffer): Promise<ParsedRoute
   for (const r of rows) {
     const routeId = str(r[0]);
     if (!routeId || routeId === '라우트번호') continue;
-    out.push({ routeId, subRoutes: splitList(r[1]) });
+    out.push({ routeId, subRoutes: splitList(r[1]), campLabel: str(r[2]) || undefined });
   }
   return out;
 }

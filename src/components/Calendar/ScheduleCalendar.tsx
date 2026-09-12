@@ -1067,6 +1067,13 @@ export default function ScheduleCalendar() {
                     regulars: displayRegulars,
                     backups: displayBackups,
                     getEffectiveCell: store.getEffectiveCell,
+                    routeCampLabels: (() => {
+                      const m = new Map<string, string>();
+                      for (const r of workerStore.routes[store.selectedCampId] ?? []) {
+                        if (r.campLabel) for (const sr of r.subRoutes) m.set(sr, r.campLabel);
+                      }
+                      return m;
+                    })(),
                   });
                 }}>
                   &#x1F4CB; 어드민 양식 다운로드

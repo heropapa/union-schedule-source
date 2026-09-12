@@ -34,6 +34,8 @@ export type SubRoute = string; // '701A', '701B', ...
 export interface Route {
   id: string;          // '701', '702', ...
   subRoutes: SubRoute[];
+  /** 이 라우트가 속한 캠프명 (비우면 현재 캠프) — 부산2 화면에서 부산3 라우트 함께 관리용 */
+  campLabel?: string;
 }
 
 /** 기사 역할 */

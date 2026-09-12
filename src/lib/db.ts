@@ -286,11 +286,13 @@ type RouteRow = {
   route_id: string;
   sub_routes: string[] | null;
   sort_order: number | null;
+  camp_label?: string | null;
 };
 
 const routeFromRow = (r: RouteRow): Route => ({
   id: r.route_id,            // 앱 모델에서 Route.id 는 사용자 facing 번호 (예: '707')
   subRoutes: r.sub_routes ?? [],
+  campLabel: r.camp_label ?? undefined,
 });
 
 /** 특정 roster의 라우트 목록. */
@@ -318,6 +320,7 @@ export async function upsertRoute(
       route_id: route.id,
       sub_routes: route.subRoutes,
       sort_order: sortOrder,
+      camp_label: route.campLabel ?? null,
     },
     { onConflict: 'weekly_roster_id,route_id' },
   );
@@ -333,6 +336,7 @@ export async function upsertRoutesBatch(rosterId: string, campId: string, routes
     route_id: r.id,
     sub_routes: r.subRoutes,
     sort_order: i,
+    camp_label: r.campLabel ?? null,
   }));
   const { error } = await supabase.from('routes').upsert(rows, { onConflict: 'weekly_roster_id,route_id' });
   if (error) throw error;
