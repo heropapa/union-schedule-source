@@ -123,6 +123,9 @@ async function parseAdmin(
   const applicable: ScheduleCell[] = [];
   const errors: ImportError[] = result.mismatched.map((mm) => ({ row: mm.row.rowNum, reason: mm.reason }));
 
+  // 같은 사람·같은 날 행이 여러 개인 경우(쿠팡 어드민은 캠프마다 행을 따로 줌):
+  // 출근(라우트 있는) 행이 휴무 행보다 우선. 출근 행이 여럿이면 라우트 합침.
+  const byKey = new Map<string, ScheduleCell>();
   for (const m of result.matched) {
     if (m.row.campName && allowed.size > 0 && !allowed.has(m.row.campName)) {
       errors.push({ row: m.row.rowNum, reason: `다른 캠프(${m.row.campName}) 행 — 무시됨` });
@@ -133,13 +136,27 @@ async function parseAdmin(
       errors.push({ row: m.row.rowNum, reason: `현재 주차(${weekDates[0]}~) 밖 날짜 ${m.row.date} — 무시됨` });
       continue;
     }
-    applicable.push({
-      workerId: m.worker.id,
-      date: m.row.date,
-      status: (m.row.status === '휴무' ? 'off' : 'work') as CellStatus,
-      routes: m.row.status === '휴무' ? [] : m.row.routes,
-    });
+    const key = `${m.worker.id}|${m.row.date}`;
+    const isOff = m.row.status === '휴무';
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, {
+        workerId: m.worker.id,
+        date: m.row.date,
+        status: (isOff ? 'off' : 'work') as CellStatus,
+        routes: isOff ? [] : m.row.routes,
+      });
+    } else if (!isOff) {
+      // 출근 행이 휴무를 덮음; 출근+출근이면 라우트 합침
+      byKey.set(key, {
+        ...prev,
+        status: 'work' as CellStatus,
+        routes: Array.from(new Set([...(prev.status === 'off' ? [] : prev.routes), ...m.row.routes])),
+      });
+    }
+    // prev가 출근이고 지금 행이 휴무면 무시 (다른 캠프에서 쉬는 것일 뿐)
   }
+  applicable.push(...byKey.values());
 
   return { applicable, errors, appliedCount: applicable.length, format: '어드민' };
 }
