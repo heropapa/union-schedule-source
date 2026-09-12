@@ -1049,7 +1049,7 @@ export default function ScheduleCalendar() {
                     getDuplicateRoutes: store.getDuplicateRoutes,
                   });
                 }}>
-                  &#x1F4CA; 일반 양식
+                  &#x1F4CA; 일반 양식 다운로드
                 </button>
                 <button onClick={async () => {
                   setShowExportMenu(false);
@@ -1069,7 +1069,7 @@ export default function ScheduleCalendar() {
                     getEffectiveCell: store.getEffectiveCell,
                   });
                 }}>
-                  &#x1F4CB; 어드민 양식
+                  &#x1F4CB; 어드민 양식 다운로드
                 </button>
                 <hr className="export-divider" />
                 <button onClick={() => triggerImport('일반')}>
