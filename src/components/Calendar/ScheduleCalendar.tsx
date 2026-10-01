@@ -482,8 +482,7 @@ export default function ScheduleCalendar() {
       link.click();
       setToast('이미지 저장 완료 ✓');
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '알 수 없는 오류';
-      alert('이미지 생성 실패: ' + msg);
+      alert('이미지 생성 실패: ' + describeError(err));
     }
 
     // 3) 원래 순서 복원
