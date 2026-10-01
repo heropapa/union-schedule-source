@@ -24,6 +24,25 @@ interface EditingCell {
   defaultValue: string;
 }
 
+/** 오류 → 사람이 읽을 메시지.
+ *  Supabase(PostgREST) 오류는 Error 인스턴스가 아니라 {message, code, details, hint}
+ *  평범한 객체라서, Error만 보면 전부 "알 수 없는 오류"로 가려진다. */
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === 'object') {
+    const e = err as { message?: string; code?: string; details?: string; hint?: string };
+    const parts = [
+      e.message ?? '',
+      e.code ? `(코드 ${e.code})` : '',
+      e.details ? `\n상세: ${e.details}` : '',
+      e.hint ? `\n힌트: ${e.hint}` : '',
+    ].filter(Boolean);
+    if (parts.length) return parts.join(' ');
+    try { return JSON.stringify(err); } catch { /* ignore */ }
+  }
+  return String(err ?? '알 수 없는 오류');
+}
+
 /** ID 배열 재정렬 */
 function reorderIds(currentOrder: string[], dragId: string, overId: string): string[] {
   const order = [...currentOrder];
@@ -294,6 +313,7 @@ export default function ScheduleCalendar() {
       return;
     }
     setSaving(true);
+    const stats = { workers: 0, routes: 0, cells: 0 };
     try {
       const campId = useScheduleStore.getState().selectedCampId;
       if (!campId) return;
@@ -317,12 +337,21 @@ export default function ScheduleCalendar() {
       const workers = [...regsOrdered, ...backsOrdered];  // 인덱스 = sort_order (고정 먼저, 백업 다음)
       const routes = ws.routes[campId] ?? [];
       const cells = Object.values(ss.cells).filter(c => workers.some(w => w.id === c.workerId));
+      stats.workers = workers.length; stats.routes = routes.length; stats.cells = cells.length;
 
       // 요청 수를 줄이기 위해 배치 upsert. 30초 넘으면 중단(타임아웃).
+      // 어느 단계에서 실패했는지 알 수 있게 단계명을 붙여 다시 던진다.
+      const step = async <T,>(label: string, fn: () => Promise<T>): Promise<T> => {
+        try {
+          return await fn();
+        } catch (e) {
+          throw new Error(`${label} 저장 중 오류 — ${describeError(e)}`);
+        }
+      };
       const doSave = (async () => {
-        await db.upsertWorkersBatch(workers);
-        await db.upsertRoutesBatch(roster.id, campId, routes);
-        if (cells.length) await db.upsertCellsBatch(cells, campId);
+        await step('인원', () => db.upsertWorkersBatch(workers));
+        await step('계약라우트', () => db.upsertRoutesBatch(roster.id, campId, routes));
+        if (cells.length) await step('스케줄(셀)', () => db.upsertCellsBatch(cells, campId));
       })();
       const timeout = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('__timeout__')), 30000));
@@ -335,8 +364,7 @@ export default function ScheduleCalendar() {
       if (err instanceof Error && err.message === '__timeout__') {
         alert('저장이 30초 넘게 응답이 없어 중단했습니다.\n네트워크(또는 Supabase 서버) 상태를 확인하고 다시 시도해주세요.');
       } else {
-        const msg = err instanceof Error ? err.message : '알 수 없는 오류';
-        alert('저장 실패:\n' + msg);
+        alert(`저장 실패:\n${describeError(err)}\n\n(인원 ${stats.workers} · 라우트 ${stats.routes} · 셀 ${stats.cells}건)`);
       }
     } finally {
       setSaving(false);
