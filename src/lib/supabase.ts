@@ -8,6 +8,10 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     storage: sessionStorage,   // 탭별 독립 세션 (다른 탭 로그아웃해도 영향 없음)
     autoRefreshToken: true,
     persistSession: true,
+    // 기본값(navigator.locks)은 탭이 백그라운드에 있다 돌아오면 토큰 갱신 잠금이
+    // 풀리지 않아 이후 모든 요청이 무한 대기하는 경우가 있다. 세션이 탭별
+    // sessionStorage라 탭 간 잠금이 필요 없으므로 잠금 없이 바로 실행.
+    lock: async (_name, _acquireTimeout, fn) => fn(),
   },
 });
 

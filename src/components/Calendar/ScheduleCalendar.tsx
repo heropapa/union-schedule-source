@@ -336,33 +336,43 @@ export default function ScheduleCalendar() {
       const backsOrdered = orderBy(ws.getBackupWorkers(campId), ws.getOrder(campId, 'sidebar', 'backup'));
       const workers = [...regsOrdered, ...backsOrdered];  // 인덱스 = sort_order (고정 먼저, 백업 다음)
       const routes = ws.routes[campId] ?? [];
-      const cells = Object.values(ss.cells).filter(c => workers.some(w => w.id === c.workerId));
+      // 이번 주 + 이번 주 인원의 셀만 저장 (다른 주차 셀까지 매번 다시 보내지 않게)
+      const workerIds = new Set(workers.map(w => w.id));
+      const weekSet = new Set(ss.weekDates);
+      const cells = Object.values(ss.cells).filter(c => workerIds.has(c.workerId) && weekSet.has(c.date));
       stats.workers = workers.length; stats.routes = routes.length; stats.cells = cells.length;
 
-      // 요청 수를 줄이기 위해 배치 upsert. 30초 넘으면 중단(타임아웃).
-      // 어느 단계에서 실패했는지 알 수 있게 단계명을 붙여 다시 던진다.
+      // 단계마다 20초 제한 — 멈추면 어느 단계에서 멈췄는지 알 수 있게 단계명을 붙인다.
       const step = async <T,>(label: string, fn: () => Promise<T>): Promise<T> => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`__timeout__:${label}`)), 20000);
+        });
         try {
-          return await fn();
+          return await Promise.race([fn(), timeout]);
         } catch (e) {
+          if (e instanceof Error && e.message.startsWith('__timeout__')) throw e;
           throw new Error(`${label} 저장 중 오류 — ${describeError(e)}`);
+        } finally {
+          clearTimeout(timer);
         }
       };
-      const doSave = (async () => {
-        await step('인원', () => db.upsertWorkersBatch(workers));
-        await step('계약라우트', () => db.upsertRoutesBatch(roster.id, campId, routes));
-        if (cells.length) await step('스케줄(셀)', () => db.upsertCellsBatch(cells, campId));
-      })();
-      const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('__timeout__')), 30000));
-      await Promise.race([doSave, timeout]);
+      await step('인원', () => db.upsertWorkersBatch(workers));
+      await step('계약라우트', () => db.upsertRoutesBatch(roster.id, campId, routes));
+      // 셀은 300건씩 나눠 보낸다 (요청 하나가 너무 커서 느려지는 것 방지)
+      for (let i = 0; i < cells.length; i += 300) {
+        await step('스케줄(셀)', () => db.upsertCellsBatch(cells.slice(i, i + 300), campId));
+      }
 
       useHistoryStore.getState().setDirty(false);
       setToast('저장 완료 ✓');
     } catch (err: unknown) {
       console.error('저장 실패:', err);
-      if (err instanceof Error && err.message === '__timeout__') {
-        alert('저장이 30초 넘게 응답이 없어 중단했습니다.\n네트워크(또는 Supabase 서버) 상태를 확인하고 다시 시도해주세요.');
+      if (err instanceof Error && err.message.startsWith('__timeout__')) {
+        const where = err.message.split(':')[1] ?? '';
+        alert(`저장이 20초 넘게 응답이 없어 중단했습니다${where ? ` (${where} 단계)` : ''}.\n\n` +
+          `작업한 내용은 화면에 그대로 남아 있습니다.\n` +
+          `다시 저장해 보시고, 또 멈추면 이 창을 캡처해 알려주세요.`);
       } else {
         alert(`저장 실패:\n${describeError(err)}\n\n(인원 ${stats.workers} · 라우트 ${stats.routes} · 셀 ${stats.cells}건)`);
       }
